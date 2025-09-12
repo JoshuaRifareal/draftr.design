@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>Draftr - Project Plan</title>
+  </head>
+  <body>
+    <outline text="Draftr - Project Plan">
+      <outline text="Overview"/>
+      <outline text="Objectives">
+        <outline text="Precision-first 2D drafting"/>
+        <outline text="Real-time collaboration"/>
+        <outline text="Lightweight and performant"/>
+        <outline text="Future 3D & BIM-lite"/>
+      </outline>
+      <outline text="Tech Stack">
+        <outline text="Frontend: React + TypeScript"/>
+        <outline text="Renderer: Rust → WASM + WebGL2"/>
+        <outline text="State: Y.js (CRDT)"/>
+        <outline text="Backend: Node.js + Postgres + S3"/>
+      </outline>
+      <outline text="Phases">
+        <outline text="Phase 0 - Prep">
+          <outline text="Recruit team"/>
+          <outline text="Design system"/>
+          <outline text="Repo & CI setup"/>
+        </outline>
+        <outline text="Phase 1 - Client Skeleton & Auth"/>
+        <outline text="Phase 2 - Engine Proto (Rust/WASM)"/>
+        <outline text="Phase 3 - Collaboration Backbone"/>
+        <outline text="Phase 4 - Core Tools & UX"/>
+        <outline text="Phase 5 - Import/Export"/>
+        <outline text="Phase 6 - Advanced 2D"/>
+        <outline text="Phase 7 - 3D Prototype"/>
+        <outline text="Phase 8 - Hardening & Testing"/>
+        <outline text="Phase 9 - Beta"/>
+        <outline text="Phase 10 - GA"/>
+      </outline>
+      <outline text="Testing">
+        <outline text="Unit Tests"/>
+        <outline text="Integration Tests"/>
+        <outline text="E2E: Playwright/Cypress"/>
+        <outline text="Load: k6"/>
+      </outline>
+      <outline text="DevOps">
+        <outline text="Hosting: Vercel + Cloud"/>
+        <outline text="CI: GitHub Actions"/>
+        <outline text="Monitoring: Sentry + Grafana"/>
+      </outline>
+      <outline text="Deliverables"/>
+      <outline text="Acceptance Criteria"/>
+      <outline text="Risks & Mitigations"/>
+    </outline>
+  </body>
+</opml>
