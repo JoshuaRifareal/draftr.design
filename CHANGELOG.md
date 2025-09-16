@@ -24,14 +24,17 @@
 
 ---
 
-## Checkpoint #3 – AutoCAD-Like Line Workflow
-- ✅ Implemented **line drawing workflow**:
-  1. First click → set start point.  
-  2. Mouse move → live preview of line.  
-  3. Second click → finalize line, auto-prepare next.  
-  4. ESC → cancel preview & exit line-drawing mode.  
-  5. Right-click → cancel preview & exit line-drawing mode.  
-- ✅ Maintains **array of committed lines** (persist until cleared).  
-- ✅ Preview line drawn separately, does not erase committed lines.  
-- ✅ Redraw cycle optimized: committed lines + optional preview on each mouse move.  
-- ✅ Confirmed **no dangling preview lines** after cancel.  
+## Checkpoint #3 – Line Workflow + Vertex Snapping
+- ✅ Implemented **line-drawing workflow**:
+  1. First click → set starting point.
+  2. Mouse move → live preview of line.
+  3. Second click → finalize line, auto-prepare next line (start = last endpoint).
+  4. ESC → cancel current line & exit line-drawing mode.
+  5. Right-click → same as ESC, context menu suppressed.
+- ✅ Lines persist after drawing; **preview lines do not overwrite committed lines**.
+- ✅ Added **soft snapping** to vertices of existing lines:
+  - Visual **snap indicator** (red cross) shows when near vertex.
+  - Snap threshold: `20px` (configurable via `SNAP_THRESHOLD`).
+  - Snapping can be **enabled/disabled** (`snapConfig.enabled`).
+- ✅ Preview line respects snapping; finalized lines use snapped positions if near.
+- ✅ Hovering indicator only active in line-drawing mode.

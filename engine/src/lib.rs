@@ -59,13 +59,78 @@ impl Renderer {
         Renderer { gl, program, pos_buffer, color_buffer, draw_call_count: 0 }
     }
 
-    /// Fixed: color passed as explicit floats
     pub fn draw_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, r: f32, g: f32, b: f32) {
         let points = [
             x1, y1, r, g, b,
             x2, y2, r, g, b,
         ];
         self.draw_lines(&points);
+    }
+
+    pub fn draw_circle(&mut self, cx: f32, cy: f32, radius: f32, r: f32, g: f32, b: f32, segments: u32) {
+        let mut points: Vec<f32> = Vec::with_capacity(((segments + 2) * 5) as usize);
+
+        // Center vertex
+        points.push(cx);
+        points.push(cy);
+        points.push(r);
+        points.push(g);
+        points.push(b);
+
+        for i in 0..=segments {
+            let theta = i as f32 / segments as f32 * std::f32::consts::TAU;
+            let x = cx + radius * theta.cos();
+            let y = cy + radius * theta.sin();
+            points.push(x);
+            points.push(y);
+            points.push(r);
+            points.push(g);
+            points.push(b);
+        }
+
+        self.draw_call_count += 1;
+        self.gl.use_program(Some(&self.program));
+
+        // Separate positions and colors
+        let mut positions = Vec::with_capacity(points.len() / 5 * 2);
+        let mut colors = Vec::with_capacity(points.len() / 5 * 3);
+
+        for chunk in points.chunks(5) {
+            positions.push(chunk[0]);
+            positions.push(chunk[1]);
+            colors.push(chunk[2]);
+            colors.push(chunk[3]);
+            colors.push(chunk[4]);
+        }
+
+        self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.pos_buffer));
+        unsafe {
+            let f32_pos = Float32Array::view(positions.as_slice());
+            self.gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &f32_pos, GL::STATIC_DRAW);
+        }
+        let a_pos = self.gl.get_attrib_location(&self.program, "a_position") as u32;
+        self.gl.enable_vertex_attrib_array(a_pos);
+        self.gl.vertex_attrib_pointer_with_i32(a_pos, 2, GL::FLOAT, false, 0, 0);
+
+        self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.color_buffer));
+        unsafe {
+            let f32_colors = Float32Array::view(colors.as_slice());
+            self.gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &f32_colors, GL::STATIC_DRAW);
+        }
+        let a_color = self.gl.get_attrib_location(&self.program, "a_color") as u32;
+        self.gl.enable_vertex_attrib_array(a_color);
+        self.gl.vertex_attrib_pointer_with_i32(a_color, 3, GL::FLOAT, false, 0, 0);
+
+        let u_res: WebGlUniformLocation = self.gl
+            .get_uniform_location(&self.program, "u_resolution")
+            .unwrap();
+        self.gl.uniform2f(
+            Some(&u_res),
+            self.gl.drawing_buffer_width() as f32,
+            self.gl.drawing_buffer_height() as f32,
+        );
+
+        self.gl.draw_arrays(GL::TRIANGLE_FAN, 0, positions.len() as i32 / 2);
     }
 
     pub fn draw_lines(&mut self, points_with_color: &[f32]) -> Float32Array {
@@ -83,7 +148,6 @@ impl Renderer {
             colors.push(chunk[4]);
         }
 
-        // Position buffer
         self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.pos_buffer));
         unsafe {
             let f32_pos = Float32Array::view(positions.as_slice());
@@ -93,7 +157,6 @@ impl Renderer {
         self.gl.enable_vertex_attrib_array(a_pos);
         self.gl.vertex_attrib_pointer_with_i32(a_pos, 2, GL::FLOAT, false, 0, 0);
 
-        // Color buffer
         self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.color_buffer));
         unsafe {
             let f32_colors = Float32Array::view(colors.as_slice());
