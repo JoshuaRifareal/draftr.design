@@ -1,0 +1,1 @@
+[f32; 3]: wasm_bindgen::describe::WasmDescribe

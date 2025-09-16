@@ -1,105 +1,140 @@
-// client/src/App.tsx
-import React, { useEffect, useRef } from "react";
-import init, { draw_line } from "./pkg/draftr_engine";
+import React, { useEffect, useRef, useState } from "react";
+import init, { Renderer } from "./pkg/draftr_engine.js"; // wasm pkg
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const drawCount = useRef<number>(0); // debug counter
+  const rendererRef = useRef<Renderer | null>(null);
+
+  // Store committed lines: each is [x1, y1, x2, y2, r, g, b]
+  const [lines, setLines] = useState<number[][]>([]);
+  // Track current line workflow
+  const [currentStart, setCurrentStart] = useState<{ x: number; y: number } | null>(null);
+  const [previewEnd, setPreviewEnd] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    const boot = async () => {
-      try {
-        await init();
-        const canvas = canvasRef.current;
-        if (!canvas) throw new Error("Canvas not found");
+    const run = async () => {
+      await init();
 
-        const gl = canvas.getContext("webgl");
-        if (!gl) throw new Error("WebGL not supported");
-
-        // Shaders
-        const vsSource = `
-          attribute vec2 aPos;
-          uniform vec2 uRes;
-          void main() {
-            vec2 zeroToOne = aPos / uRes;
-            vec2 zeroToTwo = zeroToOne * 2.0;
-            vec2 clipSpace = zeroToTwo - 1.0;
-            gl_Position = vec4(clipSpace * vec2(1, -1), 0, 1);
-          }
-        `;
-
-        const fsSource = `
-          precision mediump float;
-          uniform vec4 uColor;
-          void main() {
-            gl_FragColor = uColor;
-          }
-        `;
-
-        // Compile shader helper
-        const compile = (type: number, source: string) => {
-          const shader = gl.createShader(type)!;
-          gl.shaderSource(shader, source);
-          gl.compileShader(shader);
-          if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-            throw new Error(gl.getShaderInfoLog(shader) || "Shader compile failed");
-          }
-          return shader;
-        };
-
-        const vs = compile(gl.VERTEX_SHADER, vsSource);
-        const fs = compile(gl.FRAGMENT_SHADER, fsSource);
-
-        const program = gl.createProgram()!;
-        gl.attachShader(program, vs);
-        gl.attachShader(program, fs);
-        gl.linkProgram(program);
-        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-          throw new Error(gl.getProgramInfoLog(program) || "Program link failed");
-        }
-        gl.useProgram(program);
-
-        // Look up locations
-        const aPos = gl.getAttribLocation(program, "aPos");
-        const uColor = gl.getUniformLocation(program, "uColor");
-        const uRes = gl.getUniformLocation(program, "uRes"); // ✅ FIXED
-
-        if (!uColor || !uRes) throw new Error("Uniforms not found");
-
-        // Set resolution uniform once
-        gl.uniform2f(uRes, canvas.width, canvas.height);
-
-        // Buffer setup
-        const buffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        gl.enableVertexAttribArray(aPos);
-        gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
-
-        // Call Rust fn to get line points
-        const line = draw_line(50.0, 50.0, 350.0, 350.0);
-        console.log("draw_line returned:", line);
-
-        // Debug counter
-        drawCount.current += 1;
-        console.log("Lines drawn:", drawCount.current);
-
-        // Send data to GPU
-        gl.bufferData(gl.ARRAY_BUFFER, line, gl.STATIC_DRAW);
-
-        // Set color red
-        gl.uniform4f(uColor, 1.0, 0.0, 0.0, 1.0);
-
-        // Draw
-        gl.drawArrays(gl.LINES, 0, 2);
-      } catch (err) {
-        console.error("boot error:", err);
+      if (canvasRef.current) {
+        const renderer = new Renderer(canvasRef.current);
+        rendererRef.current = renderer;
+        renderer.clear();
       }
     };
-
-    boot();
+    run();
   }, []);
 
-  return <canvas ref={canvasRef} width={800} height={600} />;
+  const getMousePos = (evt: React.MouseEvent) => {
+    const canvas = canvasRef.current!;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: evt.clientX - rect.left,
+      y: evt.clientY - rect.top,
+    };
+  };
+
+  const redrawAll = (preview: { x: number; y: number } | null) => {
+    if (!rendererRef.current) return;
+    const renderer = rendererRef.current;
+
+    // clear first
+    renderer.clear();
+
+    // draw committed lines
+    for (const line of lines) {
+      renderer.draw_line(line[0], line[1], line[2], line[3], line[4], line[5], line[6]);
+    }
+
+    // draw preview line if exists
+    if (currentStart && preview) {
+      renderer.draw_line(currentStart.x, currentStart.y, preview.x, preview.y, 0.0, 0.0, 0.0);
+    }
+  };
+
+  // only react to left mouse button (button === 0)
+  const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
+    if (evt.button !== 0) return; // ignore right/middle clicks here
+
+    const pos = getMousePos(evt);
+
+    if (!currentStart) {
+      // first click → set start point
+      setCurrentStart(pos);
+    } else {
+      // second click → finalize line
+      const newLine = [currentStart.x, currentStart.y, pos.x, pos.y, 0.0, 0.0, 0.0];
+      setLines((prev) => [...prev, newLine]);
+      setCurrentStart(pos); // prepare for next line
+      setPreviewEnd(null);
+    }
+  };
+
+  const handleMouseMove = (evt: React.MouseEvent) => {
+    if (!currentStart) return; // only preview if we have a start point
+    const pos = getMousePos(evt);
+    setPreviewEnd(pos);
+    redrawAll(pos);
+  };
+
+  const exitLineMode = () => {
+    setCurrentStart(null);
+    setPreviewEnd(null);
+    redrawAll(null);
+  };
+
+  const handleKeyDown = (evt: React.KeyboardEvent) => {
+    if (evt.key === "Escape") {
+      exitLineMode();
+    }
+  };
+
+  // Right-click: cancel like ESC. Prevent default menu, clear preview immediately by using the renderer directly.
+  const handleContextMenu = (evt: React.MouseEvent<HTMLCanvasElement>) => {
+    evt.preventDefault(); // stop browser right-click menu
+
+    // clear the in-progress state
+    setCurrentStart(null);
+    setPreviewEnd(null);
+
+    // Immediately clear & redraw committed lines via renderer to avoid race with state updates
+    if (rendererRef.current) {
+      const renderer = rendererRef.current;
+      renderer.clear();
+      for (const line of lines) {
+        renderer.draw_line(line[0], line[1], line[2], line[3], line[4], line[5], line[6]);
+      }
+    }
+  };
+
+  const handleClear = () => {
+    setLines([]);
+    setCurrentStart(null);
+    setPreviewEnd(null);
+    rendererRef.current?.clear();
+  };
+
+  // redraw when committed lines change
+  useEffect(() => {
+    redrawAll(previewEnd);
+  }, [lines]);
+
+  return (
+    <div>
+      <canvas
+        ref={canvasRef}
+        width={650}
+        height={650}
+        style={{ border: "1px solid black", cursor: "crosshair" }}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onKeyDown={handleKeyDown}
+        onContextMenu={handleContextMenu}
+        tabIndex={0} // so canvas can receive key events
+      />
+      <br />
+      <button onClick={handleClear}>Clear</button>
+    </div>
+  );
 };
 
 export default App;

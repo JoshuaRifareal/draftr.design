@@ -20,4 +20,18 @@
 - ✅ Fixed duplicate line issue (now only one line is drawn).  
 - ✅ Added debug logging (`draw_line returned …`, `Lines drawn: 1`).  
 - ✅ Fragment shader updated → lines now render in **red**.  
-- ✅ Confirmed **clean rendering pipeline**: one red line, no duplicates.
+- ✅ Confirmed **clean rendering pipeline**: one red line, no duplicates.  
+
+---
+
+## Checkpoint #3 – AutoCAD-Like Line Workflow
+- ✅ Implemented **line drawing workflow**:
+  1. First click → set start point.  
+  2. Mouse move → live preview of line.  
+  3. Second click → finalize line, auto-prepare next.  
+  4. ESC → cancel preview & exit line-drawing mode.  
+  5. Right-click → cancel preview & exit line-drawing mode.  
+- ✅ Maintains **array of committed lines** (persist until cleared).  
+- ✅ Preview line drawn separately, does not erase committed lines.  
+- ✅ Redraw cycle optimized: committed lines + optional preview on each mouse move.  
+- ✅ Confirmed **no dangling preview lines** after cancel.  
