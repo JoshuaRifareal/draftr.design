@@ -24,7 +24,7 @@
 
 ---
 
-## Checkpoint #3 – Line Workflow + Vertex Snapping
+## Checkpoint #3 – Line Tool Workflow
 - ✅ Implemented **line-drawing workflow**:
   1. First click → set starting point.
   2. Mouse move → live preview of line.
@@ -32,9 +32,16 @@
   4. ESC → cancel current line & exit line-drawing mode.
   5. Right-click → same as ESC, context menu suppressed.
 - ✅ Lines persist after drawing; **preview lines do not overwrite committed lines**.
+
+---
+
+## Checkpoint #4 – Vertex Snapping, World Coorindates, Zooming and Panning
 - ✅ Added **soft snapping** to vertices of existing lines:
   - Visual **snap indicator** (red cross) shows when near vertex.
   - Snap threshold: `20px` (configurable via `SNAP_THRESHOLD`).
   - Snapping can be **enabled/disabled** (`snapConfig.enabled`).
 - ✅ Preview line respects snapping; finalized lines use snapped positions if near.
 - ✅ Hovering indicator only active in line-drawing mode.
+- ✅ World coordinate system (supports scaling and offset)
+- ✅ Zooming (centered on cursor, smooth and stable)
+- ✅ Panning (middle mouse drag, 1:1 movement, no jumps)
