@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import init, { Renderer } from "./pkg/draftr_engine.js";
+import UIOverlay from "./UIOverlay";
 
 const SNAP_THRESHOLD = 20; // px
 const SNAP_INDICATOR_RADIUS = 6; // px
@@ -31,6 +32,7 @@ const App: React.FC = () => {
 
   // persisted snap point to avoid flicker while mouse is idle
   const [snapPoint, setSnapPoint] = useState<{ x: number; y: number } | null>(null);
+
 
   useEffect(() => {
     const run = async () => {
@@ -342,6 +344,7 @@ const App: React.FC = () => {
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
+      {/* Drawing Canvas */}
       <canvas
         ref={canvasRef}
         width={canvasSize.w}
@@ -354,31 +357,14 @@ const App: React.FC = () => {
         onContextMenu={handleContextMenu}
         tabIndex={0}
       />
+      
       {/* Floating UI overlay */}
-      <div style={{
-        position: "absolute",
-        right: 12,
-        top: 12,
-        background: "rgba(0,0,0,0.6)",
-        color: "white",
-        padding: "8px 10px",
-        borderRadius: 6,
-        fontFamily: "monospace",
-        fontSize: 13,
-        zIndex: 9999
-      }}>
-        <div>Zoom: {Math.round(scale * 100)}%</div>
-        <div style={{ marginTop: 6 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={debug} onChange={() => setDebug(d => !d)} />
-            Debug
-          </label>
-        </div>
-
-        <div style={{ marginTop: 6 }}>
-          <button onClick={handleClear}>Clear</button>
-        </div>
-      </div>
+      <UIOverlay
+        scale={scale}
+        debug={debug}
+        setDebug={setDebug}
+        handleClear={handleClear}
+      />
     </div>
   );
 };

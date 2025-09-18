@@ -22,6 +22,16 @@ pub struct Renderer {
     pub scale: f32,
 }
 
+pub struct LineStyle {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+    pub dashed: bool,
+    pub dash_length: f32,
+    pub gap_length: f32,
+}
+
 #[wasm_bindgen]
 impl Renderer {
     #[wasm_bindgen(constructor)]
@@ -105,10 +115,10 @@ impl Renderer {
         // center vertex
         points.push(cx);
         points.push(cy);
-        points.push(r);
-        points.push(g);
-        points.push(b);
-        points.push(a);
+            points.push(r);
+            points.push(g);
+            points.push(b);
+            points.push(a);
 
         // compute actual radius in world units
         let radius_world = if screen_space {
@@ -413,3 +423,6 @@ fn link_program(gl: &GL, vert: &WebGlShader, frag: &WebGlShader) -> Result<WebGl
         Err(gl.get_program_info_log(&program).unwrap_or_else(|| "Unknown link error".into()))
     }
 }
+
+
+
