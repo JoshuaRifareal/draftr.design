@@ -216,6 +216,8 @@ const App: React.FC = () => {
           logDebug("No vertex snap, restoring ortho snapping");
         }
       }
+      // Clear snap point when no vertex is within threshold
+      setSnapPoint(null);
     }
 
     // Orthogonal Snapping (only if no vertex snap)
