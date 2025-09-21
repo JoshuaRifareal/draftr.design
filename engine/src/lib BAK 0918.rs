@@ -20,16 +20,6 @@ pub struct Renderer {
     pub offset_x: f32,
     pub offset_y: f32,
     pub scale: f32,
-
-    // orthogonal guide runtime config (px = screen pixels)
-    ortho_color: [f32; 4],
-    ortho_dash_px: f32,
-    ortho_gap_px: f32,
-    ortho_thickness_px: f32,
-    ortho_threshold_deg: f32,
-
-    // reserved: array of allowed angles in degrees (flexible)
-    ortho_angles_deg: Vec<f32>,
 }
 
 pub struct LineStyle {
@@ -100,48 +90,7 @@ impl Renderer {
             offset_x: 0.0,
             offset_y: 0.0,
             scale: 1.0,
-
-            // orthogonal defaults
-            ortho_color: [0.0, 0.0, 0.0, 0.5],
-            ortho_dash_px: 8.0,
-            ortho_gap_px: 6.0,
-            ortho_thickness_px: 1.0,
-            ortho_threshold_deg: 1.0,
-            ortho_angles_deg: vec![0.0, 45.0, 90.0, 135.0],
         }
-    }
-
-    // Ortho guide runtime configuration (call from JS)
-    #[wasm_bindgen(js_name = setOrthoColor)]
-    pub fn set_ortho_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
-        self.ortho_color = [r, g, b, a];
-    }
-
-    #[wasm_bindgen(js_name = setOrthoDash)]
-    pub fn set_ortho_dash(&mut self, dash_px: f32, gap_px: f32) {
-        self.ortho_dash_px = dash_px.max(1.0);
-        self.ortho_gap_px = gap_px.max(0.0);
-    }
-
-    #[wasm_bindgen(js_name = setOrthoThickness)]
-    pub fn set_ortho_thickness(&mut self, thickness_px: f32) {
-        self.ortho_thickness_px = thickness_px.max(0.0);
-    }
-
-    #[wasm_bindgen(js_name = setOrthoThresholdDeg)]
-    pub fn set_ortho_threshold_deg(&mut self, deg: f32) {
-        self.ortho_threshold_deg = deg.abs();
-    }
-
-    /// Add or replace allowed orthogonal angles (in degrees).
-    /// Accepts a Float32Array from JS (e.g. [0, 45, 90, 135])
-    #[wasm_bindgen(js_name = setOrthoAngles)]
-    pub fn set_ortho_angles(&mut self, arr: &Float32Array) {
-        let mut v: Vec<f32> = Vec::with_capacity(arr.length() as usize);
-        for i in 0..arr.length() {
-            v.push(arr.get_index(i));
-        }
-        self.ortho_angles_deg = v;
     }
 
     /// Resize viewport (call when canvas size changes)
@@ -155,7 +104,7 @@ impl Renderer {
             x1, y1, r, g, b, a,
             x2, y2, r, g, b, a,
         ];
-        let _ = self.draw_lines_return(points.as_slice());
+        self.draw_lines(&points);
     }
 
     /// Draw a circle; radius in screen-space only if `screen_space` is true
@@ -244,7 +193,6 @@ impl Renderer {
     }
 
     /// points_with_color is now [x,y,r,g,b,a, x,y,r,g,b,a, ...]
-    /// Returns a Float32Array copy of input (compat with previous API)
     pub fn draw_lines(&mut self, points_with_color: &[f32]) -> Float32Array {
         self.draw_call_count += 1;
         self.gl.use_program(Some(&self.program));
@@ -298,11 +246,6 @@ impl Renderer {
         self.gl.draw_arrays(GL::LINES, 0, (positions.len() / 2) as i32);
 
         Float32Array::from(points_with_color)
-    }
-
-    // internal helper that mirrors draw_lines but does not produce return value
-    fn draw_lines_return(&mut self, points_with_color: &[f32]) -> Float32Array {
-        self.draw_lines(points_with_color)
     }
 
     pub fn clear(&self) {
@@ -452,79 +395,6 @@ impl Renderer {
         self.offset_x = prev_off_x;
         self.offset_y = prev_off_y;
         self.scale = prev_scale;
-    }
-
-    /// Draw an orthogonal guide as dashed line across the canvas.
-    /// - cx,cy: world coordinates where the guide should intersect (usually cursor or preview point)
-    /// - angle_rad: direction of the line in radians (0 = horizontal to the right)
-    /// Dash and gap lengths are specified in screen pixels (converted to world units using current scale).
-    #[wasm_bindgen(js_name = drawOrthoGuide)]
-    pub fn draw_ortho_guide(&mut self, cx: f32, cy: f32, angle_rad: f32) {
-        // compute a large length in world units to cover entire canvas regardless of pan/zoom
-        let width = self.gl.drawing_buffer_width() as f32;
-        let height = self.gl.drawing_buffer_height() as f32;
-
-        // Extend length enough to fully cover diagonal of viewport, multiplied for safety
-        let diag = (width.max(height) * 2.0) / self.scale;
-
-        let dx = angle_rad.cos();
-        let dy = angle_rad.sin();
-
-        // endpoints in world coords
-        let _x1 = cx - dx * diag;
-        let _y1 = cy - dy * diag;
-        let _x2 = cx + dx * diag;
-        let _y2 = cy + dy * diag;
-
-        // dash/gap in world units
-        let dash_world = (self.ortho_dash_px / self.scale).max(1e-6);
-        let gap_world = (self.ortho_gap_px / self.scale).max(0.0);
-        let step = dash_world + gap_world;
-
-        // total length along the line (world units)
-        let _total_len = 2.0 * diag;
-        // start parameter from -diag to +diag
-        let mut t = -diag;
-
-        let mut seg_points: Vec<f32> = Vec::new();
-        let color = self.ortho_color;
-
-        while t < diag {
-            // dash segment from t to t + dash_world (clamped by diag)
-            let t0 = t.max(-diag);
-            let t1 = (t + dash_world).min(diag);
-
-            // calculate world coords for t0 and t1
-            let sx = cx + dx * t0;
-            let sy = cy + dy * t0;
-            let ex = cx + dx * t1;
-            let ey = cy + dy * t1;
-
-            // push segment as two vertices with color
-            seg_points.push(sx);
-            seg_points.push(sy);
-            seg_points.push(color[0]);
-            seg_points.push(color[1]);
-            seg_points.push(color[2]);
-            seg_points.push(color[3]);
-
-            seg_points.push(ex);
-            seg_points.push(ey);
-            seg_points.push(color[0]);
-            seg_points.push(color[1]);
-            seg_points.push(color[2]);
-            seg_points.push(color[3]);
-
-            t += step;
-        }
-
-        // attempt to set line width according to ortho_thickness_px (converted to GL line width)
-        // Note: many browsers ignore line_width for WebGL; left here for completeness.
-        self.gl.line_width(self.ortho_thickness_px);
-
-        if !seg_points.is_empty() {
-            let _ = self.draw_lines(seg_points.as_slice());
-        }
     }
 }
 

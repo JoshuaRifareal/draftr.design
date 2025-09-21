@@ -2,8 +2,17 @@ import React, { useEffect, useRef, useState } from "react";
 import init, { Renderer } from "./pkg/draftr_engine.js";
 import UIOverlay from "./UIOverlay";
 
-const SNAP_THRESHOLD = 20; // px
-const SNAP_INDICATOR_RADIUS = 6; // px
+const SNAP_THRESHOLD = 25; // px
+const SNAP_INDICATOR_RADIUS = 5; // px
+
+// Default orthogonal config (you can update at runtime via renderer methods)
+const DEFAULT_ORTHO_COLOR = { r: 0, g: 255, b: 0, a: 1.0 };
+const DEFAULT_ORTHO_DASH_PX = 8;
+const DEFAULT_ORTHO_GAP_PX = 6;
+const DEFAULT_ORTHO_THICKNESS_PX = 1;
+const DEFAULT_ORTHO_THRESHOLD_DEG = 5;
+
+const ORTHO_ANGLES_DEG = [0, 45, 90, 135]; // default set (exposed to wasm to be changed at runtime)
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -27,12 +36,32 @@ const App: React.FC = () => {
     h: typeof window !== "undefined" ? window.innerHeight : 650,
   });
 
-  // grid opacity configurable; default 0.25
-  const [gridOpacity, setGridOpacity] = useState(0.25);
-
-  // persisted snap point to avoid flicker while mouse is idle
+  // persistent snap point
   const [snapPoint, setSnapPoint] = useState<{ x: number; y: number } | null>(null);
 
+  // Shift-key orthogonal mode
+  const [shiftHeld, setShiftHeld] = useState(false);
+
+  // Orthogonal snapping toggle state
+  const [orthoSnapEnabled, setOrthoSnapEnabled] = useState(true);
+  
+  // Track if we're temporarily disabling ortho snapping due to vertex priority
+  const [orthoTempDisabled, setOrthoTempDisabled] = useState(false);
+  // Store previous ortho state for restoration after vertex snap
+  const orthoPrevStateRef = useRef<boolean>(true);
+
+  // runtime orthogonal configuration (kept in React to possibly render UI later)
+  const [orthoConfig, setOrthoConfig] = useState({
+    color: DEFAULT_ORTHO_COLOR,
+    dashPx: DEFAULT_ORTHO_DASH_PX,
+    gapPx: DEFAULT_ORTHO_GAP_PX,
+    thicknessPx: DEFAULT_ORTHO_THICKNESS_PX,
+    thresholdDeg: DEFAULT_ORTHO_THRESHOLD_DEG,
+    anglesDeg: ORTHO_ANGLES_DEG,
+  });
+
+  // track last guide active state so we can only console.log on changes
+  const guideActiveRef = useRef<boolean>(false);
 
   useEffect(() => {
     const run = async () => {
@@ -42,16 +71,23 @@ const App: React.FC = () => {
         rendererRef.current = renderer;
 
         // Set initial transform values
-        (renderer as any).offset_x = offsetX;
-        (renderer as any).offset_y = offsetY;
-        (renderer as any).scale = scale;
+        renderer.offset_x = offsetX;
+        renderer.offset_y = offsetY;
+        renderer.scale = scale;
+
+        // Configure orthogonal defaults at runtime
+        const r = (rendererRef.current as unknown as any);
+        if (r) {
+          r.setOrthoColor(orthoConfig.color.r, orthoConfig.color.g, orthoConfig.color.b, orthoConfig.color.a);
+          r.setOrthoDash(orthoConfig.dashPx, orthoConfig.gapPx);
+          r.setOrthoThickness(orthoConfig.thicknessPx);
+          r.setOrthoThresholdDeg(orthoConfig.thresholdDeg);
+          r.setOrthoAngles(new Float32Array(orthoConfig.anglesDeg));
+        }
 
         renderer.clear();
-        // ensure renderer viewport matches current canvas size
         renderer.resize(canvasSize.w, canvasSize.h);
-
-        // Draw initial grid
-        renderer.draw_grid(offsetX, offsetY, scale, gridOpacity);
+        renderer.draw_grid(offsetX, offsetY, scale);
       }
     };
     run();
@@ -69,17 +105,35 @@ const App: React.FC = () => {
       }
       if (rendererRef.current) {
         rendererRef.current.resize(w, h);
-        // We changed size; redraw
         redrawAll(previewEnd, snapPoint);
       }
     };
     window.addEventListener("resize", handleResize);
-    // set initial values
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
-  }, [previewEnd, lines, scale, offsetX, offsetY, snapPoint, gridOpacity]);
+  }, [previewEnd, lines, scale, offsetX, offsetY, snapPoint]);
 
-  // Utility logging behind debug flag
+  // keyboard listeners for Shift and F8
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(true);
+      if (e.key === "F8") {
+        e.preventDefault();
+        setOrthoSnapEnabled(prev => !prev);
+        logDebug("Ortho snap toggled:", !orthoSnapEnabled);
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [orthoSnapEnabled]);
+
   const logDebug = (...args: any[]) => {
     if (debug) console.log(...args);
   };
@@ -99,7 +153,7 @@ const App: React.FC = () => {
     return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
   };
 
-  // find snap but also persists result in snapPoint state
+  // snapping logic
   const findSnap = (pos: { x: number; y: number }) => {
     if (!snapConfig.enabled) {
       setSnapPoint(null);
@@ -109,7 +163,7 @@ const App: React.FC = () => {
     let closest: { x: number; y: number } | null = null;
     let minDist = SNAP_THRESHOLD;
 
-    // Iterate over all lines except the last one
+    // vertex snapping
     for (const line of lines.slice(0, lines.length - 1)) {
       const pts = [
         { x: line[0], y: line[1] },
@@ -127,7 +181,6 @@ const App: React.FC = () => {
       }
     }
 
-    // Handle the first point of the last line, if it exists
     if (lines.length > 0) {
       const lastLine = lines[lines.length - 1];
       const firstPointOfLastLine = { x: lastLine[0], y: lastLine[1] };
@@ -141,54 +194,158 @@ const App: React.FC = () => {
       }
     }
 
+    // Vertex Snap Priority: If we found a vertex snap, temporarily disable orthogonal snapping
     if (closest) {
       setSnapPoint(closest);
-      logDebug("snap to", closest);
+      
+      // Only disable ortho if it was enabled and we're not already in temp disabled state
+      if (orthoSnapEnabled && !orthoTempDisabled) {
+        orthoPrevStateRef.current = orthoSnapEnabled;
+        setOrthoTempDisabled(true);
+        logDebug("Vertex snap found, temporarily disabling ortho snapping");
+      }
+      
+      logDebug("snap to vertex", closest);
+      return closest; // Exit early if vertex snap is found
     } else {
-      setSnapPoint(null); // ← This is the key fix
+      // No vertex snap found, restore ortho snapping if it was temporarily disabled
+      if (orthoTempDisabled) {
+        setOrthoTempDisabled(false);
+        // Only restore if it was previously enabled (not manually toggled off)
+        if (orthoPrevStateRef.current) {
+          logDebug("No vertex snap, restoring ortho snapping");
+        }
+      }
     }
-    return closest;
+
+    // Orthogonal Snapping (only if no vertex snap)
+    return null;
   };
 
-  // redrawAll now sets renderer transform then draws grid then lines and preview/snap
+  // orthogonal helpers
+  const nearestOrthoAngleDeg = (start: { x: number; y: number }, cursorWorld: { x: number; y: number }) => {
+    const dx = cursorWorld.x - start.x;
+    const dy = cursorWorld.y - start.y;
+    const angleRad = Math.atan2(dy, dx);
+    let angleDeg = (angleRad * 180) / Math.PI;
+    if (angleDeg < 0) angleDeg += 360;
+
+    let bestCandidate = orthoConfig.anglesDeg[0];
+    let bestBase = orthoConfig.anglesDeg[0];
+    let bestDiff = 360;
+
+    for (const base of orthoConfig.anglesDeg) {
+      const candA = ((base % 360) + 360) % 360;
+      const candB = ((base + 180.0) % 360.0 + 360.0) % 360.0;
+
+      const dA = Math.abs(((angleDeg - candA + 540) % 360) - 180);
+      const dB = Math.abs(((angleDeg - candB + 540) % 360) - 180);
+
+      if (dA < bestDiff) {
+        bestDiff = dA;
+        bestCandidate = candA;
+        bestBase = base;
+      }
+      if (dB < bestDiff) {
+        bestDiff = dB;
+        bestCandidate = candB;
+        bestBase = base;
+      }
+    }
+
+    return { angle: bestCandidate, base: bestBase, diff: bestDiff };
+  };
+
+  const applyOrthoConstraint = (start: { x: number; y: number }, cursorWorld: { x: number; y: number }) => {
+    const nearest = nearestOrthoAngleDeg(start, cursorWorld);
+    if (nearest.diff > orthoConfig.thresholdDeg) return null;
+
+    const dx = cursorWorld.x - start.x;
+    const dy = cursorWorld.y - start.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const rad = (nearest.angle * Math.PI) / 180.0;
+    const nx = start.x + Math.cos(rad) * dist;
+    const ny = start.y + Math.sin(rad) * dist;
+    return { x: nx, y: ny, angle_deg: nearest.angle };
+  };
+
+  // Check if orthogonal snapping should be active (considering all conditions)
+  const shouldUseOrthoSnapping = () => {
+    // Hard override with Shift key (temporary orthogonal snapping)
+    if (shiftHeld) return true;
+    
+    // Normal orthogonal snapping (if enabled and not temporarily disabled due to vertex priority)
+    return orthoSnapEnabled && !orthoTempDisabled;
+  };
+
+  // redraw logic
   const redrawAll = (preview: { x: number; y: number } | null, snap: { x: number; y: number } | null) => {
     if (!rendererRef.current || !canvasRef.current) return;
     const renderer = rendererRef.current;
-    // update renderer transform fields (these are exposed by wasm_bindgen since the Rust fields are `pub`)
-    (renderer as any).offset_x = offsetX;
-    (renderer as any).offset_y = offsetY;
-    (renderer as any).scale = scale;
+    renderer.offset_x = offsetX;
+    renderer.offset_y = offsetY;
+    renderer.scale = scale;
 
     renderer.clear();
+    renderer.draw_grid(offsetX, offsetY, scale);
 
-    // Draw grid first (adaptive) — pass gridOpacity
-    renderer.draw_grid(offsetX, offsetY, scale, gridOpacity);
+    // draw orthogonal guides first to keep it always at the bottom 
+    if (currentStart && preview && shouldUseOrthoSnapping()) {
+      const nearest = nearestOrthoAngleDeg(currentStart, preview);
+      const guideActive = nearest.diff <= orthoConfig.thresholdDeg;
 
-    // Draw committed lines (lines stored in world coords)
+      if (guideActiveRef.current !== guideActive) {
+        guideActiveRef.current = guideActive;
+        if (guideActive) {
+          console.log(`Ortho guide active: angle=${nearest.angle}°, diff=${nearest.diff.toFixed(2)}°`);
+        } else {
+          console.log("Ortho guide inactive");
+        }
+      }
+
+      if (guideActive) {
+        const rad = (nearest.angle * Math.PI) / 180;
+        const r = (rendererRef.current as unknown as any);
+        r.drawOrthoGuide(currentStart.x, currentStart.y, rad);
+      }
+    } else {
+      if (guideActiveRef.current) {
+        guideActiveRef.current = false;
+        console.log("Ortho guide inactive");
+      }
+    }
+
     for (const line of lines) {
-      // lines array: [x1,y1,x2,y2,r,g,b] previously — update: supply alpha=1
       renderer.draw_line(line[0], line[1], line[2], line[3], line[4], line[5], line[6], 1.0);
     }
 
-    // Preview line (world coords)
     if (currentStart && preview) {
       renderer.draw_line(currentStart.x, currentStart.y, preview.x, preview.y, 0, 0, 0, 1.0);
     }
 
-    // Snap indicator: use persisted snapPoint if provided or fallback to snap argument
     const snapToDraw = snap ?? snapPoint;
     if (snapToDraw) {
-      // draw circle in world coords, radius in screen pixels, with alpha 1.0
       renderer.draw_circle(snapToDraw.x, snapToDraw.y, SNAP_INDICATOR_RADIUS, 1, 0, 0, 1.0, 16, true);
     }
   };
 
-  // Mouse events
+  // mouse handlers
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
     if (evt.button === 0) {
       const snap = findSnap(pos);
-      const finalPos = snap ?? screenToWorld(pos.x, pos.y);
+      let finalPos = snap ?? screenToWorld(pos.x, pos.y);
+
+      // Endpoint is constrained to lie along the guideline
+      if (shiftHeld && previewEnd) {
+          finalPos = previewEnd;
+      } else if (!shiftHeld && currentStart && shouldUseOrthoSnapping()) {
+        const cursorWorld = screenToWorld(pos.x, pos.y);
+        const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+        if (constrained) {
+          finalPos = { x: constrained.x, y: constrained.y };
+        }
+      }
 
       if (!currentStart) {
         setCurrentStart(finalPos);
@@ -210,43 +367,47 @@ const App: React.FC = () => {
   const handleMouseMove = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
 
-    // Panning
     if (panStartRef.current) {
       const dx = (pos.x - panStartRef.current.x) / scale;
       const dy = (pos.y - panStartRef.current.y) / scale;
-      setOffsetX((ox) => {
-        const nx = ox + dx;
-        logDebug("pan offsetX ->", nx);
-        return nx;
-      });
-      setOffsetY((oy) => {
-        const ny = oy + dy;
-        logDebug("pan offsetY ->", ny);
-        return ny;
-      });
+      setOffsetX((ox) => ox + dx);
+      setOffsetY((oy) => oy + dy);
       panStartRef.current = { x: pos.x, y: pos.y };
-      // redraw with updated offset (we call redrawAll directly because setState won't be synchronous)
-      const newOffsetX = offsetX + dx;
-      const newOffsetY = offsetY + dy;
-      if (rendererRef.current) {
-        (rendererRef.current as any).offset_x = newOffsetX;
-        (rendererRef.current as any).offset_y = newOffsetY;
-        (rendererRef.current as any).scale = scale;
-        rendererRef.current.clear();
-        rendererRef.current.draw_grid(newOffsetX, newOffsetY, scale, gridOpacity);
-        for (const line of lines) {
-          rendererRef.current.draw_line(line[0], line[1], line[2], line[3], line[4], line[5], line[6], 1.0);
-        }
-      }
+      redrawAll(previewEnd, snapPoint);
       return;
     }
 
-    // Line preview & snap
     if (!currentStart) return;
-    const snap = findSnap(pos); // findSnap will set snapPoint if found
-    const preview = snap ?? screenToWorld(pos.x, pos.y);
+    
+    const snap = findSnap(pos);
+
+    const cursorWorld = snap ?? screenToWorld(pos.x, pos.y);
+    const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
+
+    let preview = cursorWorld;
+    if (shiftHeld) {
+      // Hard snapping override with Shift key
+      const dx = cursorWorld.x - currentStart.x;
+      const dy = cursorWorld.y - currentStart.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const rad = (nearest.angle * Math.PI) / 180;
+      preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
+    } else if (shouldUseOrthoSnapping()) {
+      const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+      if (constrained) preview = { x: constrained.x, y: constrained.y };
+    }
+
     setPreviewEnd(preview);
-    // redraw and prefer the explicit snap (the findSnap persistently set snapPoint)
+
+    if (rendererRef.current) {
+      const r = (rendererRef.current as unknown as any);
+      r.setOrthoColor(orthoConfig.color.r, orthoConfig.color.g, orthoConfig.color.b, orthoConfig.color.a);
+      r.setOrthoDash(orthoConfig.dashPx, orthoConfig.gapPx);
+      r.setOrthoThickness(orthoConfig.thicknessPx);
+      r.setOrthoThresholdDeg(orthoConfig.thresholdDeg);
+      r.setOrthoAngles(new Float32Array(orthoConfig.anglesDeg));
+    }
+
     redrawAll(preview, snap);
   };
 
@@ -257,8 +418,11 @@ const App: React.FC = () => {
   const exitLineMode = () => {
     setCurrentStart(null);
     setPreviewEnd(null);
-    // clear persisted snap point as requested
     setSnapPoint(null);
+    // Reset temporary ortho disable state when exiting line mode
+    if (orthoTempDisabled) {
+      setOrthoTempDisabled(false);
+    }
     redrawAll(null, null);
   };
 
@@ -279,14 +443,14 @@ const App: React.FC = () => {
     rendererRef.current?.clear();
   };
 
-  // Attach non-passive wheel listener for zoom
+  // zoom
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     const handleWheel = (evt: WheelEvent) => {
       evt.preventDefault();
-      const pos = getMousePos(evt); // screen coords
+      const pos = getMousePos(evt);
 
       const oldScale = scale;
       const oldOffsetX = offsetX;
@@ -301,50 +465,25 @@ const App: React.FC = () => {
       const newOffsetX = pos.x / newScale - worldBeforeX;
       const newOffsetY = pos.y / newScale - worldBeforeY;
 
-      // update state
       setScale(newScale);
       setOffsetX(newOffsetX);
       setOffsetY(newOffsetY);
 
       logDebug("zoom ->", Math.round(newScale * 100) + "%", "offset", newOffsetX, newOffsetY);
 
-      // immediate redraw using the new transform values
-      if (rendererRef.current) {
-        (rendererRef.current as any).offset_x = newOffsetX;
-        (rendererRef.current as any).offset_y = newOffsetY;
-        (rendererRef.current as any).scale = newScale;
-
-        rendererRef.current.clear();
-        rendererRef.current.draw_grid(newOffsetX, newOffsetY, newScale, gridOpacity);
-
-        for (const line of lines) {
-          rendererRef.current.draw_line(line[0], line[1], line[2], line[3], line[4], line[5], line[6], 1.0);
-        }
-
-        // preview + snap drawing (if any)
-        if (currentStart && previewEnd) {
-          rendererRef.current.draw_line(currentStart.x, currentStart.y, previewEnd.x, previewEnd.y, 0, 0, 0, 1.0);
-        }
-
-        // persist snap remains drawn via snapPoint
-        if (snapPoint) {
-          rendererRef.current.draw_circle(snapPoint.x, snapPoint.y, SNAP_INDICATOR_RADIUS, 1, 0, 0, 1.0, 16, true);
-        }
-      }
+      redrawAll(previewEnd, snapPoint);
     };
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [scale, offsetX, offsetY, previewEnd, lines, currentStart, debug, gridOpacity, snapPoint]);
+  }, [scale, offsetX, offsetY, previewEnd, lines, currentStart, debug, snapPoint, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled]);
 
-  // Redraw when lines or transform change
   useEffect(() => {
     redrawAll(previewEnd, snapPoint);
-  }, [lines, scale, offsetX, offsetY, previewEnd, snapPoint, gridOpacity]);
+  }, [lines, scale, offsetX, offsetY, previewEnd, snapPoint, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled]);
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
-      {/* Drawing Canvas */}
       <canvas
         ref={canvasRef}
         width={canvasSize.w}
@@ -357,13 +496,15 @@ const App: React.FC = () => {
         onContextMenu={handleContextMenu}
         tabIndex={0}
       />
-      
-      {/* Floating UI overlay */}
       <UIOverlay
         scale={scale}
         debug={debug}
         setDebug={setDebug}
         handleClear={handleClear}
+        orthoSnapEnabled={orthoSnapEnabled}
+        setOrthoSnapEnabled={setOrthoSnapEnabled}
+        shiftHeld={shiftHeld}
+        orthoTempDisabled={orthoTempDisabled}
       />
     </div>
   );

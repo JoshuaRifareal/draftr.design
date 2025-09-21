@@ -1,0 +1,1 @@
+LineStyle: wasm_bindgen::describe::WasmDescribe
