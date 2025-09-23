@@ -1,4 +1,5 @@
 import React from 'react';
+import './UIOverlay.css';
 
 interface UIOverlayProps {
     scale: number;
@@ -9,75 +10,87 @@ interface UIOverlayProps {
     setOrthoSnapEnabled: (enabled: boolean) => void;
     shiftHeld: boolean;
     orthoTempDisabled: boolean;
+    activeTool: string;
+    handleToolChange: (tool: string) => void;
 }
 
 const UIOverlay: React.FC<UIOverlayProps> = ({ 
-    scale, 
-    debug, 
-    setDebug, 
-    handleClear, 
-    orthoSnapEnabled, 
-    setOrthoSnapEnabled,
-    shiftHeld,
-    orthoTempDisabled
-}) => {
-    // Determine the display status for orthogonal snapping
-    const getOrthoStatus = () => {
-        if (shiftHeld) return "TEMP (Shift)";
-        if (orthoTempDisabled) return "DISABLED (Vertex)";
-        return orthoSnapEnabled ? "ON" : "OFF";
-    };
+  scale, 
+  debug, 
+  setDebug, 
+  handleClear, 
+  orthoSnapEnabled, 
+  setOrthoSnapEnabled,
+  shiftHeld,
+  orthoTempDisabled,
+  activeTool,
+  handleToolChange
+  }) => {
 
-    // Determine the color for orthogonal status
-    const getOrthoStatusColor = () => {
-        if (shiftHeld) return "#4CAF50"; // Green for temporary override
-        if (orthoTempDisabled) return "#FF9800"; // Orange for vertex priority
-        return orthoSnapEnabled ? "#4CAF50" : "#F44336"; // Green for on, red for off
-    };
+  // Determine the display status for orthogonal snapping
+  const getOrthoStatus = () => {
+      if (shiftHeld) return "TEMP (Shift)";
+      if (orthoTempDisabled) return "DISABLED (Vertex)";
+      return orthoSnapEnabled ? "ON" : "OFF";
+  };
 
-    return (
-        <div style={{
-            position: "absolute",
-            right: 12,
-            top: 12,
-            background: "rgba(0,0,0,0.6)",
-            color: "white",
-            padding: "8px 10px",
-            borderRadius: 6,
-            fontFamily: "monospace",
-            fontSize: 13,
-            zIndex: 9999,
-            minWidth: "180px"
-        }}>
-            <div>Zoom: {Math.round(scale * 100)}%</div>
-            
-            <div style={{ marginTop: 6, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <span>Ortho Snap:</span>
-                <span style={{ 
-                    color: getOrthoStatusColor(),
-                    fontWeight: "bold",
-                    marginLeft: "8px"
-                }}>
-                    {getOrthoStatus()}
-                </span>
-            </div>
-            
-            <div style={{ marginTop: 6, fontSize: "11px", opacity: 0.7 }}>
-                {shiftHeld ? "Shift overriding" : "F8 to toggle"}
-            </div>
+  // Determine the color for orthogonal status
+  const getOrthoStatusColor = () => {
+      if (shiftHeld) return "#4CAF50"; // Green for temporary override
+      if (orthoTempDisabled) return "#FF9800"; // Orange for vertex priority
+      return orthoSnapEnabled ? "#4CAF50" : "#F44336"; // Green for on, red for off
+  };
 
-            <div style={{ marginTop: 6 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <input type="checkbox" checked={debug} onChange={() => setDebug(d => !d)} />
-                    Debug
-                </label>
-            </div>
+  return (
+    <div className="draftrUI">
+      
+      {/* Navigation Bar */}
+      <div className="nagivationBar">
 
-            <div style={{ marginTop: 6 }}>
-                <button onClick={handleClear}>Clear</button>
-            </div>
+        <div className="navBarLeft">
+          <div className="mainMenu"></div>
+          <div className="projectTitle">Project title 🚀</div>
         </div>
-    );
+
+        <div className="navBarRight">
+          <div className="collabIconsContainer">
+            <div className="collabIcon"></div>
+            <div className="collabIcon"></div>
+            <div className="collabIcon"></div>
+            <div className="collabIcon"></div>
+          </div>
+          <div className="shareButton">Share</div>
+          <span className="zoomLevelIndicator">{Math.round(scale * 100)}%</span>
+        </div>
+        
+
+      </div>
+
+      {/* Properties Panel */}
+      <div className="layersPanel">
+        <div className="panelHeader">Layers</div>
+        <div className="panelBody"></div>
+      </div>
+
+      {/* Action Bar */}
+      <div className="actionBar">
+        <div className="toolBar">
+            <div className={`toolButton select ${activeTool === 'SELECTION' ? 'active' : ''}`} onClick={() => handleToolChange('SELECTION')}>
+            </div>
+
+            <div className={`toolButton line ${activeTool === 'LINE' ? 'active' : ''}`} onClick={() => handleToolChange('LINE')}>
+            </div>
+
+            <div className={`toolButton circle ${activeTool === 'CIRCLE' ? 'active' : ''}`} onClick={() => handleToolChange('CIRCLE')}>
+            </div>
+
+            <div className={`toolButton rectangle ${activeTool === 'RECTANGLE' ? 'active' : ''}`} onClick={() => handleToolChange('RECTANGLE')}>
+            </div>
+          <div className="modeBar"></div>
+        </div>
+      </div>
+    </div>
+  );
 };
 
 export default UIOverlay;

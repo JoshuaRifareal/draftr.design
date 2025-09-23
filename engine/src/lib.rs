@@ -6,8 +6,8 @@ use web_sys::{
     WebGlBuffer, WebGlUniformLocation,
 };
 
-static CLEAR_COLORVAR: [f32; 4] = [1.0, 1.0, 1.0, 1.0]; // White - RGBA
-static GRID_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.3]; // Light gray - RGBA
+static CANVAS_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.02]; // White - RGBA
+static SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 1.0, 0.4]; // Blue with 50% alpha
 
 #[wasm_bindgen]
 pub struct Renderer {
@@ -21,15 +21,18 @@ pub struct Renderer {
     pub offset_y: f32,
     pub scale: f32,
 
-    // orthogonal guide runtime config (px = screen pixels)
+    // orthogonal guide runtime config
     ortho_color: [f32; 4],
     ortho_dash_px: f32,
     ortho_gap_px: f32,
     ortho_thickness_px: f32,
     ortho_threshold_deg: f32,
-
-    // reserved: array of allowed angles in degrees (flexible)
     ortho_angles_deg: Vec<f32>,
+
+    // grid runtime config
+    grid_color: [f32; 4],
+    grid_min_spacing: f32,
+    grid_max_spacing: f32,
 }
 
 pub struct LineStyle {
@@ -84,7 +87,7 @@ impl Renderer {
         let color_buffer = gl.create_buffer().unwrap();
 
         gl.viewport(0, 0, canvas.width() as i32, canvas.height() as i32);
-        gl.clear_color(CLEAR_COLORVAR[0],CLEAR_COLORVAR[1],CLEAR_COLORVAR[2],CLEAR_COLORVAR[3]);
+        gl.clear_color(CANVAS_COLOR[0],CANVAS_COLOR[1],CANVAS_COLOR[2],CANVAS_COLOR[3]);
         gl.clear(GL::COLOR_BUFFER_BIT);
 
         // Enable blending
@@ -108,6 +111,11 @@ impl Renderer {
             ortho_thickness_px: 1.0,
             ortho_threshold_deg: 1.0,
             ortho_angles_deg: vec![0.0, 45.0, 90.0, 135.0],
+
+            // grid defaults
+            grid_color: [1.0, 1.0, 1.0, 0.3], // Default light gray
+            grid_min_spacing: 10.0,
+            grid_max_spacing: 50.0,
         }
     }
 
@@ -116,21 +124,29 @@ impl Renderer {
     pub fn set_ortho_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
         self.ortho_color = [r, g, b, a];
     }
-
     #[wasm_bindgen(js_name = setOrthoDash)]
     pub fn set_ortho_dash(&mut self, dash_px: f32, gap_px: f32) {
         self.ortho_dash_px = dash_px.max(1.0);
         self.ortho_gap_px = gap_px.max(0.0);
     }
-
     #[wasm_bindgen(js_name = setOrthoThickness)]
     pub fn set_ortho_thickness(&mut self, thickness_px: f32) {
         self.ortho_thickness_px = thickness_px.max(0.0);
     }
-
     #[wasm_bindgen(js_name = setOrthoThresholdDeg)]
     pub fn set_ortho_threshold_deg(&mut self, deg: f32) {
         self.ortho_threshold_deg = deg.abs();
+    }
+
+    // Grid runtime configuration (call from JS)
+    #[wasm_bindgen(js_name = setGridColor)]
+    pub fn set_grid_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.grid_color = [r, g, b, a];
+    }
+    #[wasm_bindgen(js_name = setGridSpacing)]
+    pub fn set_grid_spacing(&mut self, min_px: f32, max_px: f32) {
+        self.grid_min_spacing = min_px;
+        self.grid_max_spacing = max_px;
     }
 
     /// Add or replace allowed orthogonal angles (in degrees).
@@ -149,7 +165,8 @@ impl Renderer {
         self.gl.viewport(0, 0, width as i32, height as i32);
     }
 
-    /// Draw a line using world coordinates (alpha added)
+    /// Draw a line
+    #[wasm_bindgen]
     pub fn draw_line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, r: f32, g: f32, b: f32, a: f32) {
         let points = [
             x1, y1, r, g, b, a,
@@ -158,8 +175,8 @@ impl Renderer {
         let _ = self.draw_lines_return(points.as_slice());
     }
 
-    /// Draw a circle; radius in screen-space only if `screen_space` is true
-    /// alpha param added
+    /// Draw a circle (doubles as snap indicator)
+    #[wasm_bindgen]
     pub fn draw_circle(&mut self, cx: f32, cy: f32, radius: f32, r: f32, g: f32, b: f32, a: f32, segments: u32, screen_space: bool) {
         let mut points: Vec<f32> = Vec::with_capacity(((segments + 2) * 6) as usize);
 
@@ -173,7 +190,6 @@ impl Renderer {
 
         // compute actual radius in world units
         let radius_world = if screen_space {
-            // convert screen radius (pixels) to world units using current scale
             radius / self.scale
         } else {
             radius
@@ -243,6 +259,242 @@ impl Renderer {
         self.gl.draw_arrays(GL::TRIANGLE_FAN, 0, (positions.len() / 2) as i32);
     }
 
+    /// Draw a rectangle
+    #[wasm_bindgen]
+    pub fn draw_rectangle(&mut self, x1: f32, y1: f32, x2: f32, y2: f32,
+        r: f32, g: f32, b: f32, a: f32, filled: bool) {
+        if filled {
+            // Filled rectangle (two triangles)
+            let points = [
+                // First triangle
+                x1, y1, r, g, b, a,
+                x2, y1, r, g, b, a,
+                x2, y2, r, g, b, a,
+                // Second triangle
+                x1, y1, r, g, b, a,
+                x2, y2, r, g, b, a,
+                x1, y2, r, g, b, a,
+            ];
+
+            self.draw_call_count += 1;
+            self.gl.use_program(Some(&self.program));
+
+            let mut positions = Vec::with_capacity(points.len() / 6 * 2);
+            let mut colors = Vec::with_capacity(points.len() / 6 * 4);
+
+            for chunk in points.chunks(6) {
+                positions.push(chunk[0]);
+                positions.push(chunk[1]);
+                colors.push(chunk[2]);
+                colors.push(chunk[3]);
+                colors.push(chunk[4]);
+                colors.push(chunk[5]);
+            }
+
+            self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.pos_buffer));
+            unsafe {
+                let f32_pos = Float32Array::view(positions.as_slice());
+                self.gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &f32_pos, GL::STATIC_DRAW);
+            }
+            let a_pos = self.gl.get_attrib_location(&self.program, "a_position") as u32;
+            self.gl.enable_vertex_attrib_array(a_pos);
+            self.gl.vertex_attrib_pointer_with_i32(a_pos, 2, GL::FLOAT, false, 0, 0);
+
+            self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.color_buffer));
+            unsafe {
+                let f32_colors = Float32Array::view(colors.as_slice());
+                self.gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &f32_colors, GL::STATIC_DRAW);
+            }
+            let a_color = self.gl.get_attrib_location(&self.program, "a_color") as u32;
+            self.gl.enable_vertex_attrib_array(a_color);
+            self.gl.vertex_attrib_pointer_with_i32(a_color, 4, GL::FLOAT, false, 0, 0);
+
+            let u_res: WebGlUniformLocation = self.gl
+                .get_uniform_location(&self.program, "u_resolution")
+                .unwrap();
+            self.gl.uniform2f(
+                Some(&u_res),
+                self.gl.drawing_buffer_width() as f32,
+                self.gl.drawing_buffer_height() as f32,
+            );
+
+            let u_offset = self.gl.get_uniform_location(&self.program, "u_offset").unwrap();
+            self.gl.uniform2f(Some(&u_offset), self.offset_x, self.offset_y);
+
+            let u_scale = self.gl.get_uniform_location(&self.program, "u_scale").unwrap();
+            self.gl.uniform1f(Some(&u_scale), self.scale);
+
+            // ✅ Draw as triangles
+            self.gl.draw_arrays(GL::TRIANGLES, 0, (positions.len() / 2) as i32);
+        } else {
+            // Outline rectangle
+            let points = [
+                x1, y1, r, g, b, a,
+                x2, y1, r, g, b, a,
+                x2, y2, r, g, b, a,
+                x1, y2, r, g, b, a,
+                x1, y1, r, g, b, a, // Close loop
+            ];
+
+            self.draw_call_count += 1;
+            self.gl.use_program(Some(&self.program));
+
+            let mut positions = Vec::with_capacity(points.len() / 6 * 2);
+            let mut colors = Vec::with_capacity(points.len() / 6 * 4);
+
+            for chunk in points.chunks(6) {
+                positions.push(chunk[0]);
+                positions.push(chunk[1]);
+                colors.push(chunk[2]);
+                colors.push(chunk[3]);
+                colors.push(chunk[4]);
+                colors.push(chunk[5]);
+            }
+
+            self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.pos_buffer));
+            unsafe {
+                let f32_pos = Float32Array::view(positions.as_slice());
+                self.gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &f32_pos, GL::STATIC_DRAW);
+            }
+            let a_pos = self.gl.get_attrib_location(&self.program, "a_position") as u32;
+            self.gl.enable_vertex_attrib_array(a_pos);
+            self.gl.vertex_attrib_pointer_with_i32(a_pos, 2, GL::FLOAT, false, 0, 0);
+
+            self.gl.bind_buffer(GL::ARRAY_BUFFER, Some(&self.color_buffer));
+            unsafe {
+                let f32_colors = Float32Array::view(colors.as_slice());
+                self.gl.buffer_data_with_array_buffer_view(GL::ARRAY_BUFFER, &f32_colors, GL::STATIC_DRAW);
+            }
+            let a_color = self.gl.get_attrib_location(&self.program, "a_color") as u32;
+            self.gl.enable_vertex_attrib_array(a_color);
+            self.gl.vertex_attrib_pointer_with_i32(a_color, 4, GL::FLOAT, false, 0, 0);
+
+            let u_res: WebGlUniformLocation = self.gl
+                .get_uniform_location(&self.program, "u_resolution")
+                .unwrap();
+            self.gl.uniform2f(
+                Some(&u_res),
+                self.gl.drawing_buffer_width() as f32,
+                self.gl.drawing_buffer_height() as f32,
+            );
+
+            let u_offset = self.gl.get_uniform_location(&self.program, "u_offset").unwrap();
+            self.gl.uniform2f(Some(&u_offset), self.offset_x, self.offset_y);
+
+            let u_scale = self.gl.get_uniform_location(&self.program, "u_scale").unwrap();
+            self.gl.uniform1f(Some(&u_scale), self.scale);
+
+            // ✅ Draw as line loop
+            self.gl.draw_arrays(GL::LINE_LOOP, 0, (positions.len() / 2) as i32);
+        }
+    }
+
+    /// Draw a selection rectangle
+    #[wasm_bindgen]
+    pub fn draw_selection_rectangle(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) {
+        self.draw_rectangle(x1, y1, x2, y2, 
+            SELECTION_COLOR[0], SELECTION_COLOR[1], SELECTION_COLOR[2], SELECTION_COLOR[3], 
+            true
+        );
+    }
+
+    /// Draw a cross indicator
+    #[wasm_bindgen]
+    pub fn draw_cross(&mut self, cx: f32, cy: f32, size_px: f32, r: f32, g: f32, b: f32, a: f32) {
+        // Convert screen size to world units
+        let size_world = size_px / self.scale;
+        let half_size = size_world / 2.0;
+        
+        // Create horizontal line
+        let x1 = cx - half_size;
+        let x2 = cx + half_size;
+        
+        // Create vertical line  
+        let y1 = cy - half_size;
+        let y2 = cy + half_size;
+        
+        // Draw horizontal line
+        self.draw_line(x1, cy, x2, cy, r, g, b, a);
+        
+        // Draw vertical line
+        self.draw_line(cx, y1, cx, y2, r, g, b, a);
+    }
+
+    /// Draw a constraint guide (horizontal or vertical dashed line)
+    #[wasm_bindgen]
+    pub fn draw_constraint_guide(&mut self, cx: f32, cy: f32, is_horizontal: bool, r: f32, g: f32, b: f32, a: f32) {
+        let width = self.gl.drawing_buffer_width() as f32;
+        let height = self.gl.drawing_buffer_height() as f32;
+        
+        // Convert screen dash/gap to world units
+        let dash_world = (self.ortho_dash_px / self.scale).max(1e-6);
+        let gap_world = (self.ortho_gap_px / self.scale).max(0.0);
+        let step = dash_world + gap_world;
+        
+        // Calculate large enough length to cover the entire viewport
+        let viewport_width = width / self.scale;
+        let viewport_height = height / self.scale;
+        let diag = viewport_width.max(viewport_height) * 2.0;
+        
+        let mut seg_points: Vec<f32> = Vec::new();
+        
+        if is_horizontal {
+            // Horizontal constraint line at y = cy
+            let mut x = cx - diag;
+            while x < cx + diag {
+                let x0 = x;
+                let x1 = (x + dash_world).min(cx + diag);
+                
+                seg_points.push(x0);
+                seg_points.push(cy);
+                seg_points.push(r);
+                seg_points.push(g);
+                seg_points.push(b);
+                seg_points.push(a);
+                
+                seg_points.push(x1);
+                seg_points.push(cy);
+                seg_points.push(r);
+                seg_points.push(g);
+                seg_points.push(b);
+                seg_points.push(a);
+                
+                x += step;
+            }
+        } else {
+            // Vertical constraint line at x = cx
+            let mut y = cy - diag;
+            while y < cy + diag {
+                let y0 = y;
+                let y1 = (y + dash_world).min(cy + diag);
+                
+                seg_points.push(cx);
+                seg_points.push(y0);
+                seg_points.push(r);
+                seg_points.push(g);
+                seg_points.push(b);
+                seg_points.push(a);
+                
+                seg_points.push(cx);
+                seg_points.push(y1);
+                seg_points.push(r);
+                seg_points.push(g);
+                seg_points.push(b);
+                seg_points.push(a);
+                
+                y += step;
+            }
+        }
+        
+        // Set line thickness
+        self.gl.line_width(self.ortho_thickness_px);
+        
+        // Draw the constraint guide
+        if !seg_points.is_empty() {
+            let _ = self.draw_lines(seg_points.as_slice());
+        }
+    }
+
     /// points_with_color is now [x,y,r,g,b,a, x,y,r,g,b,a, ...]
     /// Returns a Float32Array copy of input (compat with previous API)
     pub fn draw_lines(&mut self, points_with_color: &[f32]) -> Float32Array {
@@ -306,7 +558,7 @@ impl Renderer {
     }
 
     pub fn clear(&self) {
-        self.gl.clear_color(CLEAR_COLORVAR[0],CLEAR_COLORVAR[1],CLEAR_COLORVAR[2],CLEAR_COLORVAR[3]);
+        self.gl.clear_color(CANVAS_COLOR[0],CANVAS_COLOR[1],CANVAS_COLOR[2],CANVAS_COLOR[3]);
         self.gl.clear(GL::COLOR_BUFFER_BIT);
     }
 
@@ -331,8 +583,8 @@ impl Renderer {
         let max_y = height / scale - offset_y;
 
         // Choose a "nice" world spacing such that spacing_in_pixels in [30, 100]
-        let min_px = 30.0;
-        let max_px = 100.0;
+        let min_px = self.grid_min_spacing;
+        let max_px = self.grid_max_spacing;
         let mut chosen_spacing_world = 1.0_f32;
         let base_steps = [1.0_f32, 2.0_f32, 5.0_f32];
 
@@ -358,8 +610,8 @@ impl Renderer {
         let mut minor_points: Vec<f32> = Vec::new(); // x,y,r,g,b,a, x2...
         let mut major_points: Vec<f32> = Vec::new();
 
-        let major_color: [f32; 4] = GRID_COLOR;
-        let minor_color: [f32; 4] = [GRID_COLOR[0], GRID_COLOR[1], GRID_COLOR[2], (GRID_COLOR[3] * 0.7)]; // lighter, same alpha
+        let major_color: [f32; 4] = self.grid_color;
+        let minor_color: [f32; 4] = [self.grid_color[0], self.grid_color[1], self.grid_color[2], (self.grid_color[3] * 0.7)]; // lighter, same alpha
 
         // vertical lines
         let start_i = (min_x / chosen_spacing_world).floor() as i32;

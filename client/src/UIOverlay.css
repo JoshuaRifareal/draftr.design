@@ -1,0 +1,190 @@
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.draftrUI {
+  height: 100%;
+  width: 100%; 
+  position: fixed;
+  top: 0;
+  left: 0;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: none;
+  font-size: 9pt;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.nagivationBar {
+  height: 28px;
+  margin-bottom: 32px;
+  display: flex;
+
+  .navBarLeft, .navBarRight {
+    display: flex;
+    align-items: center; 
+    gap: 8px;
+    width: 50%;
+  }
+
+  .navBarLeft {
+    justify-content: flex-start;
+  }
+
+  .navBarRight {
+    justify-content:  flex-end;
+  }
+
+  .mainMenu, .shareButton {
+    height: 100%;
+    display: flex;
+    align-items: center; 
+    justify-content: center;
+    width: 60px;
+    border-radius: 16px;
+  }
+
+  .mainMenu {
+    color: black;
+    background-color: lightgray;
+  }
+
+  .shareButton {
+    color: white;
+    background-color: rgb(131, 52, 131);
+  }
+
+  .collabIconsContainer {
+    height: 100%;
+    display: flex;
+    gap: 5px;
+    
+    .collabIcon {
+      aspect-ratio: 1 / 1; 
+      border-radius: 50%;
+      background-color: lightgray;
+    }
+  }
+
+  .zoomLevelIndicator {
+    display: flex;
+    align-items: center; 
+    justify-content: center; 
+    height: 100%;
+    width: 30px;
+    min-width: 30px; 
+  }
+}
+
+.layersPanel {
+  width: 200px;
+  min-width: 200px;
+  max-width: 250px;
+
+  height: 450px;
+  min-height: 250px;
+  max-height: 800px;
+
+  border-radius: 16px;
+  overflow: hidden;
+  color: black;
+  resize: both;
+  pointer-events: auto;
+
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+
+
+  &::-webkit-resizer {
+    display: none;
+  }
+
+  .panelHeader {
+    width: 100%;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding-left: 16px;
+    background-color: #ececec;
+  }
+
+  .panelBody {
+    width: 100%;
+    height: 100%;
+
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(3px) saturate(180%);
+    -webkit-backdrop-filter: blur(15px) saturate(180%);
+    border: 2px solid rgba(255, 255, 255, 0.3);
+  }
+}
+
+.actionBar {
+  height: 28px;
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  background: rgba(255, 255, 255, 0.95);
+  pointer-events: auto;
+
+  .toolBar {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+
+    .toolButton {
+      height: 100%;
+      aspect-ratio: 1.1 / 1; 
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background-color: #f5f5f5;
+      position: relative;
+      overflow: hidden;
+      
+      background-repeat: no-repeat;
+      background-position: center;
+      background-size: 60%;
+
+      &.select {
+        background-image: url("./assets/cursor-24-regular.svg");
+      }
+      &.line {
+        background-image: url("./assets/line-flow-diagonal-up-right-24-regular.svg");
+      }
+      &.circle {
+        background-image: url("./assets/circle-24-regular.svg");
+      }
+      &.rectangle {
+        background-image: url("./assets/square-stroke-rounded.svg");
+      }
+      &.select,
+      &.line,
+      &.circle,
+      &.rectangle {
+        &:hover {
+          background-color: rgb(233, 233, 233);
+        }
+      }
+    }
+  }
+
+  .modeBar {
+    height: 100%;
+    width: 45px;
+    border-radius: 8px;
+    background-color: #f5f5f5;
+  }
+}
+
