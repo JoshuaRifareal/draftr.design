@@ -1,0 +1,252 @@
+:root {
+  /* Theme variables with defaults */
+  --mainMenu-bg: #1c1c1e;
+  --shareButton-bg: #5f51ff;
+  --zoomLevelIndicator-color: #ffffff;
+  --panelHeader-bg: #3c3c3c;
+  --panelBody-bg: #1e1e1e;
+  --actionBar-bg: rgba(45, 45, 48, 0.95);
+  --toolButton-bg: #3c3c3c;
+  --toolButton-active-bg: #5f51ff;
+  --modeBar-bg: #3c3c3c;
+  --text-primary: #ffffff;
+  --text-secondary: #cccccc;
+  --border-color: #444444;
+  --shadow-color: rgba(0, 0, 0, 0.3);
+  
+  /* Smooth transitions */
+  transition: all 0.3s ease-in-out;
+}
+
+html, body, #app {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  color: var(--text-primary);
+}
+
+.draftrUI {
+  height: 100%;
+  width: 100%; 
+  position: fixed;
+  top: 0;
+  left: 0;
+  padding: 16px;
+  box-sizing: border-box;
+  pointer-events: none;
+  font-size: 9pt;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text-primary);
+}
+
+.nagivationBar {
+  height: 28px;
+  margin-bottom: 24px;
+  display: flex;
+  pointer-events: auto;
+
+  .navBarLeft, .navBarRight {
+    display: flex;
+    align-items: center; 
+    gap: 8px;
+    width: 50%;
+  }
+
+  .navBarLeft {
+    justify-content: flex-start;
+  }
+
+  .navBarRight {
+    justify-content:  flex-end;
+  }
+
+  .mainMenu, .shareButton {
+    height: 100%;
+    display: flex;
+    align-items: center; 
+    justify-content: center;
+    width: 60px;
+    border-radius: 16px;
+    transition: all 0.3s ease-in-out;
+  }
+
+  .mainMenu {
+    padding: 0 5px;
+    color: var(--text-primary);
+    background-color: var(--mainMenu-bg);
+    font-weight: bold;
+    font-size: 14px;
+  }
+
+  .shareButton {
+    color: white;
+    background-color: var(--shareButton-bg);
+  }
+
+  .collabIconsContainer {
+    height: 100%;
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: center;
+    gap: 5px;
+    
+    .collabIcon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100;
+      height: 100%;
+      aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      background-color: var(--mainMenu-bg);
+      transition: all 0.3s ease-in-out;
+      overflow: hidden;
+      position: relative;
+
+      img {
+        width: 90%;
+        height: 90%;
+        display: block;
+        object-fit: cover;
+        border-radius: 50%;
+      }
+
+      &::after {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        border-radius: 50%;
+        pointer-events: none;
+      }
+    
+      /* Border colors on pseudo-element */
+      &:nth-child(1)::after { box-shadow: none; }
+      &:nth-child(2)::after { box-shadow: inset 0 0 0 2px #ff3636; }
+      &:nth-child(3)::after { box-shadow: inset 0 0 0 2px #f8883e; }
+      &:nth-child(4)::after { box-shadow: inset 0 0 0 2px #338b28; }
+      &:nth-child(5)::after { box-shadow: inset 0 0 0 2px #2e6ece; }
+      &:nth-child(6)::after { box-shadow: inset 0 0 0 2px #FF9FF3; }
+    }
+  }
+
+  .zoomLevelIndicator {
+    display: flex;
+    align-items: center; 
+    justify-content: center; 
+    height: 100%;
+    width: 30px;
+    min-width: 30px; 
+    color: var(--zoomLevelIndicator-color);
+  }
+}
+
+.layersPanel {
+  width: 200px;
+  min-width: 200px;
+  max-width: 250px;
+  height: 450px;
+  min-height: 250px;
+  max-height: 800px;
+  border-radius: 16px;
+  overflow: hidden;
+  resize: both;
+  pointer-events: auto;
+  box-shadow: 0 2px 4px var(--shadow-color);
+  border: 1px solid var(--border-color);
+
+  &::-webkit-resizer {
+    display: none;
+  }
+
+  .panelHeader {
+    width: 100%;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    padding-left: 16px;
+    background-color: var(--panelHeader-bg);
+    color: var(--text-primary);
+  }
+
+  .panelBody {
+    width: 100%;
+    height: 100%;
+    background-color: var(--panelBody-bg);
+    color: var(--text-primary);
+  }
+}
+
+.actionBar {
+  height: 28px;
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 16px;
+  padding: 8px;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  background-color: var(--actionBar-bg);
+  pointer-events: auto;
+  border: 1px solid var(--border-color);
+
+  .toolBar {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+
+    .toolButton {
+      height: 100%;
+      aspect-ratio: 1.1 / 1; 
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      background-color: var(--toolButton-bg);
+      border: 1px solid var(--border-color);
+
+      /* svg fill */
+      svg {
+        height: 100%;
+        width: 100%;
+        fill: var(--svg-stroke-color, white);
+      }
+
+      /* svg stroke */
+      &.rectangle>svg {
+        stroke: var(--svg-stroke-color, white);
+        stroke-width: 1.5;
+        fill: none;
+      }
+    }
+
+    /* active button and on hover */
+    .toolButton.active, .toolButton:hover {
+      background-color: var(--toolButton-active-bg);
+
+      svg {
+        fill: var(--svg-active-color, white);
+      }
+      &.rectangle>svg {
+        stroke: var(--svg-active-color);
+        fill: none;
+      }
+    }
+  }
+
+  .modeBar {
+    height: 100%;
+    width: 50px;
+    border-radius: 8px;
+    background-color: var(--modeBar-bg);
+    border: 1px solid var(--border-color);
+    transition: all 0.3s ease-in-out;
+  }
+}

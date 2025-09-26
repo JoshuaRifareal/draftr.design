@@ -7,7 +7,16 @@ use web_sys::{
 };
 
 static CANVAS_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.02]; // White - RGBA
-static SELECTION_COLOR: [f32; 4] = [0.0, 0.0, 1.0, 0.4]; // Blue with 50% alpha
+
+pub struct LineStyle {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+    pub dashed: bool,
+    pub dash_length: f32,
+    pub gap_length: f32
+}
 
 #[wasm_bindgen]
 pub struct Renderer {
@@ -33,16 +42,10 @@ pub struct Renderer {
     grid_color: [f32; 4],
     grid_min_spacing: f32,
     grid_max_spacing: f32,
-}
 
-pub struct LineStyle {
-    pub r: f32,
-    pub g: f32,
-    pub b: f32,
-    pub a: f32,
-    pub dashed: bool,
-    pub dash_length: f32,
-    pub gap_length: f32,
+    // canvas runtime config
+    canvas_color: [f32; 4],
+    selection_color: [f32; 4]
 }
 
 #[wasm_bindgen]
@@ -87,7 +90,7 @@ impl Renderer {
         let color_buffer = gl.create_buffer().unwrap();
 
         gl.viewport(0, 0, canvas.width() as i32, canvas.height() as i32);
-        gl.clear_color(CANVAS_COLOR[0],CANVAS_COLOR[1],CANVAS_COLOR[2],CANVAS_COLOR[3]);
+        gl.clear_color(CANVAS_COLOR[0], CANVAS_COLOR[1], CANVAS_COLOR[2], CANVAS_COLOR[3]);
         gl.clear(GL::COLOR_BUFFER_BIT);
 
         // Enable blending
@@ -116,6 +119,10 @@ impl Renderer {
             grid_color: [1.0, 1.0, 1.0, 0.3], // Default light gray
             grid_min_spacing: 10.0,
             grid_max_spacing: 50.0,
+
+            // canvas defaults
+            canvas_color: [0.0, 0.0, 0.0, 0.02],
+            selection_color: [0.0, 0.0, 1.0, 0.4]
         }
     }
 
@@ -149,8 +156,20 @@ impl Renderer {
         self.grid_max_spacing = max_px;
     }
 
+    // Canvas runtime configuration (call from JS)
+    #[wasm_bindgen(js_name = setCanvasColor)]
+    pub fn set_canvas_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.canvas_color = [r, g, b, a];
+    }
+
+    // Selection color configuration  
+    #[wasm_bindgen(js_name = setSelectionColor)]
+    pub fn set_selection_color(&mut self, r: f32, g: f32, b: f32, a: f32) {
+        self.selection_color = [r, g, b, a];
+    }
+
+
     /// Add or replace allowed orthogonal angles (in degrees).
-    /// Accepts a Float32Array from JS (e.g. [0, 45, 90, 135])
     #[wasm_bindgen(js_name = setOrthoAngles)]
     pub fn set_ortho_angles(&mut self, arr: &Float32Array) {
         let mut v: Vec<f32> = Vec::with_capacity(arr.length() as usize);
@@ -393,7 +412,8 @@ impl Renderer {
     #[wasm_bindgen]
     pub fn draw_selection_rectangle(&mut self, x1: f32, y1: f32, x2: f32, y2: f32) {
         self.draw_rectangle(x1, y1, x2, y2, 
-            SELECTION_COLOR[0], SELECTION_COLOR[1], SELECTION_COLOR[2], SELECTION_COLOR[3], 
+            self.selection_color[0], self.selection_color[1], 
+            self.selection_color[2], self.selection_color[3], 
             true
         );
     }
@@ -558,7 +578,12 @@ impl Renderer {
     }
 
     pub fn clear(&self) {
-        self.gl.clear_color(CANVAS_COLOR[0],CANVAS_COLOR[1],CANVAS_COLOR[2],CANVAS_COLOR[3]);
+        self.gl.clear_color(
+            self.canvas_color[0], 
+            self.canvas_color[1], 
+            self.canvas_color[2], 
+            self.canvas_color[3]
+        );
         self.gl.clear(GL::COLOR_BUFFER_BIT);
     }
 

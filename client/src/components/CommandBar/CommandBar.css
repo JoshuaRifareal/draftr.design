@@ -1,0 +1,97 @@
+.command-bar-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 10000;
+
+  .command-bar {
+    position: absolute;
+    width: 320px;
+    max-height: 400px;
+    background-color: var(--panelBody-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    box-shadow: 0 8px 24px var(--shadow-color);
+    pointer-events: all;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+    input {
+      padding: 16px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text-primary);
+      font-size: 14px;
+      border-bottom: 1px solid var(--border-color);
+    
+      .command-input::placeholder {
+        color: var(--text-secondary);
+      }
+    }
+
+    .command-results {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      max-height: 300px;
+
+      .command-item {
+        padding: 6px 14px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        border-left: 3px solid transparent;
+
+        &:hover {
+          background-color: var(--toolButton-bg);
+        }
+
+        &.selected {
+          background-color: var(--toolButton-active-bg);
+          border-left-color: var(--toolButton-active-bg);
+        
+          span {
+            color: white;
+          }
+        }
+      }
+
+      &::-webkit-scrollbar {
+        display: none;
+      }
+    }
+  }
+}
+
+.command-label {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.command-category {
+  display: inline-block;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.command-description {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.no-results {
+  padding: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
+}

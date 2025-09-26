@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from "react";
-import init, { Renderer } from "./pkg/draftr_engine.js";
-import UIOverlay from "./UIOverlay";
+import init from "./pkg/draftr_engine.js";
+import { RenderService } from './services/RenderService.ts';
+import { snappingService, contextManager, type SnapResult, type SnapType } from './services/SnappingService';
+import { ThemeManager, type Theme } from './services/ThemeManager.ts';
+import UIOverlay from "./components/UIOverlay.js";
 
 // Default snapping config
 const SNAP_THRESHOLD = 25; // px
 const SNAP_INDICATOR_RADIUS = 4; // px
-const CROSS_INDICATOR_SIZE = 8; // px
-const CONSTRAINT_COLOR = { r: 128, g: 0, b: 128, a: 1.0 }; // dark purple/violet
+const CROSS_INDICATOR_SIZE = 10; // px
 
 // Default orthogonal config
 const ORTHO_COLOR = { r: 0, g: 255, b: 0, a: 1.0 };
@@ -17,14 +19,24 @@ const ORTHO_THRESHOLD_DEG = 5;
 const ORTHO_ANGLES_DEG = [0, 45, 90, 135]; // can be changed at runtime
 
 // Default grid config
-const GRID_COLOR = { r: 0, g: 0, b: 0, a: 0.2 };
-const GRID_SPACING_MIN_PX = 12.0;
+const GRID_COLOR = { r: 0, g: 0, b: 0, a: 0.1 };
+const GRID_SPACING_MIN_PX = 25.0;
 const GRID_SPACING_MAX_PX = 50.0;
+
+// Default canvas and selection color
+const CANVAS_COLOR = { r: 0.17, g: 0.17, b: 0.19, a: 1.0 }; // Black with slight alpha
+const SELECTION_COLOR = { r: 0.0, g: 0.0, b: 1.0, a: 0.25 }; // Blue with 40% alpha
 
 
 const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const rendererRef = useRef<Renderer | null>(null);
+  const serviceRef = useRef<RenderService | null>(null);
+
+  // Initialize theme manager amd color configurations
+  const themeManager = useRef(new ThemeManager()).current;
+  const [currentTheme, setCurrentTheme] = useState<Theme>('light');
+  const [lineColor, setLineColor] = useState({ r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
+  const [snapColor, setSnapColor] = useState({ r: 1.0, g: 0.8, b: 0.0, a: 1.0 });
 
   // Tool types and states
   type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE';
@@ -32,7 +44,7 @@ const App: React.FC = () => {
   const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
 
-  // Line drawing state
+  // Line drawing state and style configuration
   const [lines, setLines] = useState<number[][]>([]);
   const [currentStart, setCurrentStart] = useState<{ x: number; y: number } | null>(null);
   const [previewEnd, setPreviewEnd] = useState<{ x: number; y: number } | null>(null);
@@ -43,6 +55,13 @@ const App: React.FC = () => {
   const [offsetX, setOffsetX] = useState(0);
   const [offsetY, setOffsetY] = useState(0);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
+
+  // Snap states
+  const [snapResult, setSnapResult] = useState<SnapResult>({
+    position: { x: 0, y: 0 },
+    type: 'none',
+    strength: 0
+  });
 
   // Runtime orthogonal configuration
   const [orthoConfig, setOrthoConfig] = useState({
@@ -61,6 +80,13 @@ const App: React.FC = () => {
     spacingMax: GRID_SPACING_MAX_PX
   });
 
+  // Runtime constraint configuration
+  const [constraintColor, setConstraintColor] = useState({ r: 128, g: 0, b: 128, a: 1.0 });
+
+  // Runtime canvas and selection configuration
+  const [canvasColor, setCanvasColor] = useState(CANVAS_COLOR);
+  const [selectionColor, setSelectionColor] = useState(SELECTION_COLOR);
+
   // Window resize state
   const [debug, setDebug] = useState(true);
   const [canvasSize, setCanvasSize] = useState<{ w: number; h: number }>({
@@ -68,8 +94,20 @@ const App: React.FC = () => {
     h: typeof window !== "undefined" ? window.innerHeight : 650,
   });
 
-  // Persistent snap point
-  const [snapPoint, setSnapPoint] = useState<{ x: number; y: number } | null>(null);
+  // Snap state and Hysteresis
+  const [currentSnap, setCurrentSnap] = useState<{
+    type: SnapType;
+    position: { x: number; y: number };
+    strength: number;
+  } | null>(null);
+  const [hysteresisActive, setHysteresisActive] = useState(false);
+
+  // No snap result helper function
+  const createNoSnapResult = (): SnapResult => ({
+    position: { x: 0, y: 0 },
+    type: 'none',
+    strength: 0
+  });
 
   // Shift-key orthogonal mode
   const [shiftHeld, setShiftHeld] = useState(false);
@@ -79,11 +117,9 @@ const App: React.FC = () => {
   
   // Temporarily disabling ortho snapping based on vertex priority
   const [orthoTempDisabled, setOrthoTempDisabled] = useState(false);
-  const orthoPrevStateRef = useRef<boolean>(true);
 
   // Temporarily disabling constraint snapping based on vertex priority
   const [constraintTempDisabled, setConstraintTempDisabled] = useState(false);
-  const constraintPrevStateRef = useRef<boolean>(true);
 
   // Vertex constraint state
   const [vertexConstraints, setVertexConstraints] = useState<{x: number, y: number}[]>([]);
@@ -95,40 +131,82 @@ const App: React.FC = () => {
   // Track last guide active state so we can only console.log on changes
   const guideActiveRef = useRef<boolean>(false);
 
-  // Initial Run
+
+  ////////// INITIALIZAION \\\\\\\\\\\
   useEffect(() => {
     const run = async () => {
       await init();
       if (canvasRef.current) {
-        const renderer = new Renderer(canvasRef.current);
-        rendererRef.current = renderer;
-
+        const service = new RenderService(canvasRef.current);
+        serviceRef.current = service;
+  
         // Set initial transform values
-        renderer.offset_x = offsetX;
-        renderer.offset_y = offsetY;
-        renderer.scale = scale;
+        service.setTransform(offsetX, offsetY, scale);
+  
+        // Set orthogonal defaults
+        service.setOrthoConfig(orthoConfig);
+        
+        // Set grid defaults  
+        service.setGridConfig(gridConfig);
 
-        const r = (rendererRef.current as unknown as any);
-        if (r) {
-          // Set orthogonal defaults
-          r.setOrthoColor(orthoConfig.color.r, orthoConfig.color.g, orthoConfig.color.b, orthoConfig.color.a);
-          r.setOrthoDash(orthoConfig.dashPx, orthoConfig.gapPx);
-          r.setOrthoThickness(orthoConfig.thicknessPx);
-          r.setOrthoThresholdDeg(orthoConfig.thresholdDeg);
-          r.setOrthoAngles(new Float32Array(orthoConfig.anglesDeg));
-
-          // Set grid defaults
-          r.setGridColor(gridConfig.color.r, gridConfig.color.g, gridConfig.color.b, gridConfig.color.a);
-          r.setGridSpacing(gridConfig.spacingMin, gridConfig.spacingMax);
-        }
-
-        renderer.clear();
-        renderer.resize(canvasSize.w, canvasSize.h);
-        renderer.draw_grid(offsetX, offsetY, scale);
+        // Set canvas and selection color
+        service.setCanvasColor(
+          canvasColor.r, canvasColor.g, canvasColor.b, canvasColor.a
+        );
+        service.setSelectionColor(
+          selectionColor.r, selectionColor.g, selectionColor.b, selectionColor.a
+        );
+  
+        service.clear();
+        service.resize(canvasSize.w, canvasSize.h);
+        service.drawGrid(offsetX, offsetY, scale);
       }
     };
     run();
   }, []);
+
+  // Snapping config update on mount
+  useEffect(() => {
+    snappingService.updateConfig({
+      thresholdPx: SNAP_THRESHOLD,
+      constraintEnabled: orthoSnapEnabled,
+      orthoEnabled: orthoSnapEnabled,
+      orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
+      orthoAnglesDeg: ORTHO_ANGLES_DEG,
+    });
+  }, [orthoSnapEnabled]);
+
+  // Context manager update when state changes
+  useEffect(() => {
+    contextManager.updateContext({
+      lines,
+      vertexConstraints,
+      activeConstraint,
+      currentStart,
+      shiftHeld,
+      orthoTempDisabled,
+      constraintTempDisabled,
+      scale,
+      offsetX,
+      offsetY
+    });
+  }, [lines, vertexConstraints, activeConstraint, currentStart, shiftHeld, 
+      orthoTempDisabled, constraintTempDisabled, scale, offsetX, offsetY]);
+
+  // Color configuration
+  useEffect(() => {
+    if (serviceRef.current) {
+      serviceRef.current.setCanvasColor(
+        canvasColor.r, canvasColor.g, canvasColor.b, canvasColor.a
+      );
+      serviceRef.current.setSelectionColor(
+        selectionColor.r, selectionColor.g, selectionColor.b, selectionColor.a
+      );
+      
+      // Redraw to apply the new canvas background color immediately
+      redrawAll(previewEnd, snapResult);
+    }
+  }, [canvasColor, selectionColor]);
 
   // Handle Resize
   useEffect(() => {
@@ -137,34 +215,70 @@ const App: React.FC = () => {
       const h = window.innerHeight;
       setCanvasSize({ w, h });
       if (canvasRef.current) {
-        canvasRef.current.width = w;
-        canvasRef.current.height = h;
+        canvasRef.current.width = w * window.devicePixelRatio; // ✅ Handle high-DPI
+        canvasRef.current.height = h * window.devicePixelRatio;
+        canvasRef.current.style.width = w + 'px';
+        canvasRef.current.style.height = h + 'px';
       }
-      if (rendererRef.current) {
-        rendererRef.current.resize(w, h);
-        redrawAll(previewEnd, snapPoint);
+      if (serviceRef.current) {
+        serviceRef.current.resize(w, h);
+        redrawAll(previewEnd, snapResult);
       }
     };
     window.addEventListener("resize", handleResize);
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
-  }, [lines, scale, offsetX, offsetY, previewEnd, snapPoint, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
+  }, [lines, scale, offsetX, offsetY, previewEnd, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
 
   // Keyboard listeners
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F8" || e.key === "F9" || e.key === "F10") {
+        e.preventDefault();
+      }
+
       if (e.key === "Shift") setShiftHeld(true);
       if (e.key === "F8") {
         e.preventDefault();
-        setOrthoSnapEnabled(prev => !prev);
-        logDebug("Ortho snap toggled:", !orthoSnapEnabled);
+        const newOrthoEnabled = !orthoSnapEnabled;
+        setOrthoSnapEnabled(newOrthoEnabled);
+        
+        snappingService.updateConfig({
+          orthoEnabled: newOrthoEnabled
+        });
+        
+        logDebug("Ortho snap toggled:", newOrthoEnabled);
+      }
+      if (e.key === "F9") {
+        e.preventDefault();
+        const newConstraintEnabled = !snappingService.getConfig().constraintEnabled;
+        
+        snappingService.updateConfig({ 
+          constraintEnabled: newConstraintEnabled 
+        });
+
+        if (!newConstraintEnabled) {
+          setVertexConstraints([]);
+          setActiveConstraint(null);
+          hoveredVerticesRef.current.clear();
+        }
+        logDebug("Constraint snap toggled:", newConstraintEnabled);
+      }
+      if (e.key === "F10") {
+        e.preventDefault();
+        handleThemeToggle();
+      }
+      if (e.key === "Escape") {
+        resetTool();
+        setActiveTool('SELECTION');
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === "Shift") setShiftHeld(false);
     };
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("keyup", onKeyUp);
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("keyup", onKeyUp, { capture: true });
     return () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
@@ -190,7 +304,7 @@ const App: React.FC = () => {
       const delta = -evt.deltaY * 0.001;
       let newScale = oldScale * (1 + delta);
 
-      newScale = Math.max(0.05, Math.min(20000, newScale)); // Limit scale between 0 and 20000 (2 million %)
+      newScale = Math.max(0.05, Math.min(20000, newScale));
 
       const newOffsetX = pos.x / newScale - worldBeforeX;
       const newOffsetY = pos.y / newScale - worldBeforeY;
@@ -199,19 +313,21 @@ const App: React.FC = () => {
       setOffsetX(newOffsetX);
       setOffsetY(newOffsetY);
 
-      logDebug("zoom ->", Math.round(newScale * 100) + "%", "offset", newOffsetX, newOffsetY);
-
-      redrawAll(previewEnd, snapPoint);
+      redrawAll(previewEnd, snapResult);
     };
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [scale, offsetX, offsetY, previewEnd, lines, currentStart, debug, snapPoint, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled]);
+  }, [scale, offsetX, offsetY, previewEnd, lines, currentStart, debug, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled]);
 
   // Redraw all states
   useEffect(() => {
-    redrawAll(previewEnd, snapPoint);
-  }, [lines, scale, offsetX, offsetY, previewEnd, snapPoint, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
+    redrawAll(previewEnd, snapResult);
+  }, [lines, scale, offsetX, offsetY, previewEnd, 
+      lineColor, snapColor, snapResult, orthoConfig, 
+      shiftHeld, orthoSnapEnabled, orthoTempDisabled, 
+      vertexConstraints, activeConstraint, gridConfig, 
+      canvasColor, selectionColor, currentTheme]);
 
   // Custom debug logger
   const logDebug = (...args: any[]) => {
@@ -228,9 +344,13 @@ const App: React.FC = () => {
     y: (y + offsetY) * scale,
   });
 
+  // Get mouse position
   const getMousePos = (evt: MouseEvent | React.MouseEvent) => {
     const rect = canvasRef.current!.getBoundingClientRect();
-    return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+    const x = evt.clientX - rect.left;
+    const y = evt.clientY - rect.top;
+    
+    return { x, y };
   };
 
   // Generate a unique key for a vertex
@@ -239,7 +359,9 @@ const App: React.FC = () => {
   };
 
   // Toggle vertex constraint
-  const toggleVertexConstraint = (vertex: { x: number; y: number }) => {
+  const toggleVertexConstraint = (vertex: { x: number; y: number } | null | undefined) => {
+    if (!vertex) return;
+    
     const key = getVertexKey(vertex);
     setVertexConstraints(prev => {
       const exists = prev.some(v => getVertexKey(v) === key);
@@ -252,193 +374,94 @@ const App: React.FC = () => {
   };
 
   // Snapping logic
-  const findSnap = (pos: { x: number; y: number }) => {
-    let closest: { x: number; y: number } | null = null;
-    let minDist = SNAP_THRESHOLD;
-
-    // return null if snap disabled OR using Selection tool
+  const findSnap = (pos: { x: number; y: number }): SnapResult => {
     if (!snapConfig.enabled || activeTool === 'SELECTION') {
-      setSnapPoint(null);
-      return null;
+      const result: SnapResult = {
+        position: screenToWorld(pos.x, pos.y),
+        type: 'none',
+        strength: 0
+      };
+      setSnapResult(result);
+      setActiveConstraint(null);
+      setHysteresisActive(false);
+      setCurrentSnap(null);
+      return result;
     }
-
-    // prioritize vertex snapping
-    for (const line of lines.slice(0, lines.length - 1)) {
-      const pts = [
-        { x: line[0], y: line[1] },
-        { x: line[2], y: line[3] },
-      ];
-      for (const pt of pts) {
-        const screenPt = worldToScreen(pt.x, pt.y);
-        const dx = screenPt.x - pos.x;
-        const dy = screenPt.y - pos.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < minDist) {
-          minDist = dist;
-          closest = pt;
-        }
-      }
-    }
-    if (lines.length > 0) {
-      const lastLine = lines[lines.length - 1];
-      const firstPointOfLastLine = { x: lastLine[0], y: lastLine[1] };
-      const screenPt = worldToScreen(firstPointOfLastLine.x, firstPointOfLastLine.y);
-      const dx = screenPt.x - pos.x;
-      const dy = screenPt.y - pos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < minDist) {
-        minDist = dist;
-        closest = firstPointOfLastLine;
-      }
-    }
-
-    // temporarily disable orthogonal and constraint snapping
-    if (closest) {
-      setSnapPoint(closest);
+  
+    const result = snappingService.findSnap(pos, contextManager.getContext());
+  
+    // Hysteresis state management
+    if (hysteresisActive && currentSnap?.type === 'vertex') {
+      const cursorScreen = pos;
+      const snapScreen = worldToScreen(currentSnap.position.x, currentSnap.position.y);
+      const screenDistance = Math.sqrt(
+        Math.pow(cursorScreen.x - snapScreen.x, 2) + 
+        Math.pow(cursorScreen.y - snapScreen.y, 2)
+      );
+      const UNSNAP_THRESHOLD = SNAP_THRESHOLD * 1.5;
       
-      // Temporarily disable ortho 
-      if (orthoSnapEnabled && !orthoTempDisabled) {
-        orthoPrevStateRef.current = orthoSnapEnabled;
-        setOrthoTempDisabled(true);
-        logDebug("Vertex snap found, temporarily disabling ortho snapping");
+      if (screenDistance <= UNSNAP_THRESHOLD) {
+        const stickResult: SnapResult = {
+          position: currentSnap.position,
+          type: currentSnap.type,
+          metadata: { vertex: currentSnap.position },
+          strength: Math.max(0.7, 1 - (screenDistance / UNSNAP_THRESHOLD))
+        };
+        
+        setSnapResult(stickResult);
+        return stickResult;
+      } else {
+        setHysteresisActive(false);
+        setCurrentSnap(null);
       }
-
-      // Temporarily disable constraint snapping
-      if (!constraintTempDisabled && vertexConstraints.length > 0) {
-        constraintPrevStateRef.current = activeConstraint !== null; // Store if constraint was active
-        setConstraintTempDisabled(true);
-        setActiveConstraint(null); // Deactivate any current constraint
-        logDebug("Vertex snap found, temporarily disabling constraint snapping");
-      }
-      
-      logDebug("snap to vertex", closest);
-      return closest; // Exit early if vertex snap is found
+    }
+  
+    // Activate or deactivate hysteresis
+    if (result.type === 'vertex') {
+      console.log("🚀 Hysteresis activated")
+      setHysteresisActive(true);
+      setCurrentSnap({
+        type: result.type,
+        position: result.position,
+        strength: result.strength
+      });
     } else {
-      // Restore ortho snapping
+      if (hysteresisActive) {
+        console.log('🔄 Clearing hysteresis');
+        setHysteresisActive(false);
+        setCurrentSnap(null);
+      }
+    }
+  
+    // Handle constraint state
+    if (result.type === 'constraint' && result.metadata?.constraint) {
+      setActiveConstraint(result.metadata.constraint);
+    } else if (result.type === 'intersection' && result.metadata?.constraint) {
+      setActiveConstraint(result.metadata.constraint);
+    } else if (result.type === 'vertex') {
+      setActiveConstraint(null);
+    } else {
+      setActiveConstraint(null);
+    }
+  
+    // Handle temporary disabling
+    if (result.type === 'vertex' || hysteresisActive) {
+      if (orthoSnapEnabled && !orthoTempDisabled) {
+        setOrthoTempDisabled(true);
+      }
+      if (!constraintTempDisabled && vertexConstraints.length > 0) {
+        setConstraintTempDisabled(true);
+      }
+    } else {
       if (orthoTempDisabled) {
         setOrthoTempDisabled(false);
-        if (orthoPrevStateRef.current) {
-          logDebug("No vertex snap, restoring ortho snapping");
-        }
       }
-
-      // Restore constraint snapping
       if (constraintTempDisabled) {
         setConstraintTempDisabled(false);
-        if (constraintPrevStateRef.current) {
-          logDebug("No vertex snap, restoring constraint snapping");
-        }
-      }
-
-      // Clear snap point when no vertex is within threshold
-      setSnapPoint(null);
-    }
-
-    return null;
-  };
-
-  // Find intersection between orthogonal guide and active constraint
-  const findIntersectionSnap = (start: { x: number; y: number } | null, cursorWorld: { x: number; y: number }) => {
-    if (!start || !activeConstraint || !shouldUseOrthoSnapping()) return null;
-    if (!activeConstraint || !shouldUseOrthoSnapping()) return null;
-    
-    const nearest = nearestOrthoAngleDeg(start, cursorWorld);
-    if (nearest.diff > orthoConfig.thresholdDeg) return null;
-    
-    // Calculate orthogonal line equation: y = mx + b
-    const angleRad = (nearest.angle * Math.PI) / 180;
-    const m = Math.tan(angleRad);
-    const b = start.y - m * start.x;
-    
-    // Calculate intersection with constraint
-    let intersection: { x: number; y: number } | null = null;
-    
-    if (activeConstraint.type === 'horizontal') {
-      // Horizontal constraint: y = constraintY
-      intersection = {
-        x: (activeConstraint.y - b) / m,
-        y: activeConstraint.y
-      };
-    } else {
-      // Vertical constraint: x = constraintX
-      intersection = {
-        x: activeConstraint.x,
-        y: m * activeConstraint.x + b
-      };
-    }
-    
-    // Check if intersection is close to cursor
-    const dx = intersection.x - cursorWorld.x;
-    const dy = intersection.y - cursorWorld.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    const INTERSECTION_THRESHOLD = SNAP_THRESHOLD / scale;
-    
-    if (dist < INTERSECTION_THRESHOLD) {
-      return intersection;
-    }
-    
-    return null;
-  };
-
-  // Check for constraint snapping
-  const findConstraintSnap = (pos: { x: number; y: number }) => {
-    
-    if (activeTool === 'SELECTION') {
-      setActiveConstraint(null);
-      return null;
-    }
-    if (constraintTempDisabled) {
-      return null;
-    }
-    if (!snapConfig.enabled || vertexConstraints.length === 0) {
-      setActiveConstraint(null);
-      return null;
-    }
-
-    const cursorWorld = screenToWorld(pos.x, pos.y);
-    let closestConstraint: { x: number, y: number, type: 'horizontal' | 'vertical', distance: number } | null = null;
-    const CONSTRAINT_THRESHOLD = SNAP_THRESHOLD / scale;
-
-    for (const constraint of vertexConstraints) {
-      // Check horizontal constraint (y alignment)
-      const horizontalDist = Math.abs(cursorWorld.y - constraint.y);
-      if (horizontalDist < CONSTRAINT_THRESHOLD) {
-        if (!closestConstraint || horizontalDist < closestConstraint.distance) {
-          closestConstraint = { 
-            x: constraint.x, 
-            y: constraint.y, 
-            type: 'horizontal', 
-            distance: horizontalDist 
-          };
-        }
-      }
-
-      // Check vertical constraint (x alignment)
-      const verticalDist = Math.abs(cursorWorld.x - constraint.x);
-      if (verticalDist < CONSTRAINT_THRESHOLD) {
-        if (!closestConstraint || verticalDist < closestConstraint.distance) {
-          closestConstraint = { 
-            x: constraint.x, 
-            y: constraint.y, 
-            type: 'vertical', 
-            distance: verticalDist 
-          };
-        }
       }
     }
-
-    if (closestConstraint) {
-      setActiveConstraint(closestConstraint);
-      // Return the constrained position
-      if (closestConstraint.type === 'horizontal') {
-        return { x: cursorWorld.x, y: closestConstraint.y };
-      } else {
-        return { x: closestConstraint.x, y: cursorWorld.y };
-      }
-    } else {
-      setActiveConstraint(null);
-      return null;
-    }
+    setSnapResult(result);
+    return result;
   };
 
   // Orthogonal helpers
@@ -497,109 +520,129 @@ const App: React.FC = () => {
   };
 
   // Redraw logic
-  const redrawAll = (preview: { x: number; y: number } | null, snap: { x: number; y: number } | null) => {
-    if (!rendererRef.current || !canvasRef.current) return;
-    const renderer = rendererRef.current;
-    renderer.offset_x = offsetX;
-    renderer.offset_y = offsetY;
-    renderer.scale = scale;
-
-    renderer.clear();
-    renderer.draw_grid(offsetX, offsetY, scale);
-
+  const redrawAll = (preview: { x: number; y: number } | null, snapResult: SnapResult) => {
+    if (!serviceRef.current || !canvasRef.current) return;
+    const service = serviceRef.current;
+    
+    service.setTransform(offsetX, offsetY, scale);
+    service.clear();
+    service.drawGrid(offsetX, offsetY, scale);
+  
     // Draw constraint guides first (behind everything)
-    if (activeTool !== 'SELECTION' && activeConstraint) {
-      const r = (rendererRef.current as unknown as any);
-      r.draw_constraint_guide(
+    if (activeTool !== 'SELECTION' && activeConstraint && snappingService.getConfig().constraintEnabled) {
+      service.drawConstraintGuide(
         activeConstraint.x, 
         activeConstraint.y, 
         activeConstraint.type === 'horizontal',
-        CONSTRAINT_COLOR.r, CONSTRAINT_COLOR.g, CONSTRAINT_COLOR.b, CONSTRAINT_COLOR.a
+        constraintColor.r, constraintColor.g, constraintColor.b, constraintColor.a
       );
     }
-
+      
     // Draw orthogonal guides next
     if (currentStart && preview && shouldUseOrthoSnapping()) {
-      const nearest = nearestOrthoAngleDeg(currentStart, preview);
+      const guidePreview = snapResult.type === 'intersection' ? snapResult.position : preview;
+      
+      const nearest = nearestOrthoAngleDeg(currentStart, guidePreview);
       const guideActive = nearest.diff <= orthoConfig.thresholdDeg;
 
       if (guideActiveRef.current !== guideActive) {
         guideActiveRef.current = guideActive;
-        if (guideActive) {
-          console.log(`Ortho guide active: angle=${nearest.angle}°, diff=${nearest.diff.toFixed(2)}°`);
-        } else {
-          console.log("Ortho guide inactive");
-        }
       }
 
       if (guideActive) {
         const rad = (nearest.angle * Math.PI) / 180;
-        const r = (rendererRef.current as unknown as any);
-        r.drawOrthoGuide(currentStart.x, currentStart.y, rad);
+        service.drawOrthoGuide(currentStart.x, currentStart.y, rad);
       }
     } else {
       if (guideActiveRef.current) {
         guideActiveRef.current = false;
-        console.log("Ortho guide inactive");
       }
     }
-
+  
     // Draw all existing lines
     for (const line of lines) {
-      renderer.draw_line(line[0], line[1], line[2], line[3], line[4], line[5], line[6], 1.0);
+      service.drawLine(line[0], line[1], line[2], line[3],
+        lineColor.r, lineColor.g, lineColor.b, lineColor.a);
     }
-
-    // Draw cross indicators for vertex constraints
-    if (activeTool !== 'SELECTION') {
-      for (const constraint of vertexConstraints) {
-        const r = (rendererRef.current as unknown as any);
-        r.draw_cross(
-          constraint.x, 
-          constraint.y, 
-          CROSS_INDICATOR_SIZE,
-          1, 0, 0, 1.0 // Red cross indicators
-        );
-      }
-    }
-
+  
     // Draw selection rectangle if in selection mode
     if (activeTool === 'SELECTION' && selectionStart && selectionEnd) {
-      const r = (rendererRef.current as unknown as any);
-      r.draw_selection_rectangle(
+      service.drawSelectionRectangle(
         selectionStart.x, 
         selectionStart.y, 
         selectionEnd.x, 
         selectionEnd.y
       );
     }
-
+  
     // Draw preview line
     if (currentStart && preview) {
-      renderer.draw_line(currentStart.x, currentStart.y, preview.x, preview.y, 0, 0, 0, 1.0);
+      service.drawLine(currentStart.x, currentStart.y, preview.x, preview.y, 
+        lineColor.r, lineColor.g, lineColor.b, lineColor.a);
     }
 
-    // Draw snap point indicator
-    const snapToDraw = snap ?? snapPoint;
-    if (snapToDraw) {
-      renderer.draw_circle(snapToDraw.x, snapToDraw.y, SNAP_INDICATOR_RADIUS, 1, 0, 0, 1.0, 16, true);
+    // Draw cross indicators for vertex constraints
+    if (activeTool !== 'SELECTION' && snappingService.getConfig().constraintEnabled) {
+      for (const constraint of vertexConstraints) {
+        service.drawCross(
+          constraint.x, 
+          constraint.y, 
+          CROSS_INDICATOR_SIZE,
+          snapColor.r, snapColor.g, snapColor.b, snapColor.a
+        );
+      }
     }
+
+    // Draw circle or cross indicators based on snapResult
+    if (snapResult.type !== 'none') {
+
+      switch (snapResult.type) {
+        case 'vertex':
+          service.drawCircle(
+            snapResult.position.x, 
+            snapResult.position.y, 
+            SNAP_INDICATOR_RADIUS, 
+            snapColor.r, snapColor.g, snapColor.b, snapColor.a,
+            16, 
+            true
+          );
+        break;
+        case 'intersection':
+          service.drawCross(
+            snapResult.position.x, 
+            snapResult.position.y,  
+            CROSS_INDICATOR_SIZE,
+            snapColor.r, snapColor.g, snapColor.b, snapColor.a
+          );
+        break;
+        case 'constraint':
+        break;
+        case 'ortho':
+        break;
+      }
+    }
+  
+    // Update orthogonal configuration if needed
+    service.setOrthoConfig(orthoConfig);
   };
 
-  /// Mouse, Keyboard and State handlers
+
+  ////////// INTERACTION \\\\\\\\\\\
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
 
     if (evt.button === 0) {
-      const snap = findSnap(pos);
-      const constraintSnap = findConstraintSnap(pos);
-      const cursorWorld = constraintSnap ?? snap ?? screenToWorld(pos.x, pos.y);
+      const snapResult = findSnap(pos);
+      const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
+      const cursorWorld = constraintSnap ?? 
+                         (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
       let intersectionSnap = null;
 
       if (currentStart) {
-        intersectionSnap = findIntersectionSnap(currentStart, cursorWorld);
+        intersectionSnap = snapResult.type === 'intersection' ? snapResult.position : null;
       }
 
-      //  selection tool capture cursor
+      // Selection tool capture cursor
       if (activeTool === 'SELECTION') {
         if (selectionStart === null) {
           setSelectionStart(screenToWorld(pos.x, pos.y));
@@ -608,9 +651,7 @@ const App: React.FC = () => {
           setSelectionEnd(screenToWorld(pos.x, pos.y));
           
           if (selectionEnd) {
-            // process selection here before clearing
             console.log("Finalizing selection:", { selectionStart, selectionEnd });
-            
           }
 
           setSelectionStart(null);
@@ -620,11 +661,9 @@ const App: React.FC = () => {
         return;
       }
 
-      // rectangle tool define corners
+      // Rectangle tool define corners
       if (activeTool === 'RECTANGLE') {
-        const snap = findSnap(pos);
-        const constraintSnap = findConstraintSnap(pos);
-        const cursorWorld = constraintSnap ?? snap ?? screenToWorld(pos.x, pos.y);
+        const cursorWorld = snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y);
 
         if (!currentStart) {
           // First corner
@@ -651,16 +690,19 @@ const App: React.FC = () => {
         return;
       }
 
-      // snapping priority (highest to lowest)
-      let finalPos = snap ?? intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
+      // Snapping priority (highest to lowest)
+      let finalPos = snapResult.type === 'vertex' ? snapResult.position : 
+                    intersectionSnap ?? 
+                    constraintSnap ?? 
+                    screenToWorld(pos.x, pos.y);
 
-      // finalize endpoint and preview
+      // Finalize endpoint and preview
       if (previewEnd) {
         // Use previewEnd if available
         finalPos = previewEnd;
       } else if (shiftHeld && previewEnd) {
-          // Endpoint is constrained to lie along the guideline
-          finalPos = previewEnd;
+        // Endpoint is constrained to lie along the guideline
+        finalPos = previewEnd;
       } else if (!shiftHeld && currentStart && shouldUseOrthoSnapping()) {
         const cursorWorld = screenToWorld(pos.x, pos.y);
         const constrained = applyOrthoConstraint(currentStart, cursorWorld);
@@ -671,17 +713,17 @@ const App: React.FC = () => {
 
       if (!currentStart) {
         setCurrentStart(finalPos);
-        logDebug("start line at", finalPos);
       } else {
         setLines((prev) => {
-          const newLine = [currentStart.x, currentStart.y, finalPos.x, finalPos.y, 0, 0, 0];
-          logDebug("commit line", newLine);
+          const newLine = [currentStart.x, currentStart.y, 
+            finalPos.x, finalPos.y,
+            lineColor.r, lineColor.g, lineColor.b, lineColor.a];
           return [...prev, newLine];
         });
         setCurrentStart(finalPos);
         setPreviewEnd(null);
-
-        // clear constraints when finalizing an endpoint
+  
+        // Clear constraints when finalizing an endpoint
         setVertexConstraints([]);
         setActiveConstraint(null);
         hoveredVerticesRef.current.clear();
@@ -692,22 +734,22 @@ const App: React.FC = () => {
   };
   const handleMouseMove = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
-    // Check for vertex hover to toggle constraints
-    const snap = findSnap(pos);
-    const constraintSnap = findConstraintSnap(pos);
-    const cursorWorld = constraintSnap ?? snap ?? screenToWorld(pos.x, pos.y);
-    //calculate intersection snap for preview
-    const intersectionSnap = findIntersectionSnap(currentStart, cursorWorld);
+    const currentSnapResult = findSnap(pos);
+    const constraintSnap = currentSnapResult.type === 'constraint' ? currentSnapResult.position : null;
+    const cursorWorld = constraintSnap ?? 
+                       (currentSnapResult.type !== 'none' ? currentSnapResult.position : screenToWorld(pos.x, pos.y));
+    const intersectionSnap = currentSnapResult.type === 'intersection' ? currentSnapResult.position : null;
     let preview = cursorWorld;
 
-    //  Panning functionality
+
+    // Panning functionality
     if (panStart) {
       const dx = (pos.x - panStart.x) / scale;
       const dy = (pos.y - panStart.y) / scale;
       setOffsetX((ox) => ox + dx);
       setOffsetY((oy) => oy + dy);
-      setPanStart({ x: pos.x, y: pos.y }); // Update pan start position
-      redrawAll(previewEnd, snapPoint);
+      setPanStart({ x: pos.x, y: pos.y });
+      redrawAll(previewEnd, currentSnapResult);
       return;
     }
 
@@ -715,66 +757,70 @@ const App: React.FC = () => {
     if (activeTool === 'SELECTION' && selectionStart) {
       const cursorWorld = screenToWorld(pos.x, pos.y);
       setSelectionEnd(cursorWorld);
-      redrawAll(previewEnd, snapPoint);
+      redrawAll(previewEnd, currentSnapResult);
       return;
     }
 
     // Check for vertex hover to toggle constraints
-    if (snap) {
-      const key = getVertexKey(snap);
+    if (currentSnapResult.type === 'vertex' && currentSnapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+      const vertex = currentSnapResult.metadata.vertex;
+      const key = getVertexKey(vertex);
       if (!hoveredVerticesRef.current.has(key)) {
         hoveredVerticesRef.current.add(key);
-        toggleVertexConstraint(snap);
+        toggleVertexConstraint(vertex);
       }
     } else {
       hoveredVerticesRef.current.clear();
     }
+
     if (!currentStart) return;
 
-    // Soft and Hard snapping logic
-    if (currentStart) {
+    // 1. ABSOLUTE HIGHEST PRIORITY: Hysteresis override
+    if (hysteresisActive && currentSnap?.type === 'vertex') {
+      preview = currentSnap.position;
+    } 
+    // 2. HIGH PRIORITY: Vertex or intersection snaps (when not in hysteresis)
+    else if (currentSnapResult.type === 'vertex' || currentSnapResult.type === 'intersection') {
+      if (currentSnapResult.type === 'intersection' && currentSnapResult.strength > 0.1) {
+        preview = currentSnapResult.position;
+      } else if (currentSnapResult.type === 'vertex') {
+        preview = currentSnapResult.position;
+      }
+    } 
+    // 3. MEDIUM PRIORITY: Shift-held ortho snapping (user override)
+    else if (shiftHeld) {
+      // Hard snapping override with Shift key
+      const dx = cursorWorld.x - currentStart.x;
+      const dy = cursorWorld.y - currentStart.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
       const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
-      
-      if (shiftHeld) {
-        // Hard snapping override with Shift key
-        const dx = cursorWorld.x - currentStart.x;
-        const dy = cursorWorld.y - currentStart.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const rad = (nearest.angle * Math.PI) / 180;
-        preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
-      } else if (shouldUseOrthoSnapping()) {
-        const constrained = applyOrthoConstraint(currentStart, cursorWorld);
-        if (constrained) preview = { x: constrained.x, y: constrained.y };
+      const rad = (nearest.angle * Math.PI) / 180;
+      preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
+    } 
+    // 4. LOW PRIORITY: Normal ortho snapping (if enabled and not temporarily disabled)
+    else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
+      const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+      if (constrained) {
+        preview = { x: constrained.x, y: constrained.y };
+      } else {
       }
-      
-      // prioritize intersection snap for preview
-      if (intersectionSnap) {
-        preview = intersectionSnap;
-      }
+    }
+    // 5. FALLBACK: Use whatever snap result we have
+    else {
+      preview = currentSnapResult.position;
     }
 
     // Render ortho guidelines
-    if (rendererRef.current) {
-      const r = (rendererRef.current as unknown as any);
-      r.setOrthoColor(orthoConfig.color.r, orthoConfig.color.g, orthoConfig.color.b, orthoConfig.color.a);
-      r.setOrthoDash(orthoConfig.dashPx, orthoConfig.gapPx);
-      r.setOrthoThickness(orthoConfig.thicknessPx);
-      r.setOrthoThresholdDeg(orthoConfig.thresholdDeg);
-      r.setOrthoAngles(new Float32Array(orthoConfig.anglesDeg));
+    if (serviceRef.current) {
+      serviceRef.current.setOrthoConfig(orthoConfig);
     }
 
     setPreviewEnd(preview);
-    redrawAll(preview, snap);
+    redrawAll(preview, currentSnapResult);
   };
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     if (evt.button === 1) {
       setPanStart(null);
-    }
-  };
-  const handleKeyDown = (evt: React.KeyboardEvent) => {
-    if (evt.key === "Escape") {
-      resetTool();
-      setActiveTool('SELECTION');
     }
   };
   const handleContextMenu = (evt: React.MouseEvent<HTMLCanvasElement>) => {
@@ -785,7 +831,7 @@ const App: React.FC = () => {
     setLines([]);
     setVertexConstraints([]);
     resetTool();
-    rendererRef.current?.clear();
+    serviceRef.current?.clear();
   };
   const handleToolChange = (tool: ToolType) => {
     // Handle tool change
@@ -795,22 +841,68 @@ const App: React.FC = () => {
   const resetTool = () => {
     setCurrentStart(null);
     setPreviewEnd(null);
-    setSnapPoint(null);
     setActiveConstraint(null);
     setVertexConstraints([]);
     setSelectionStart(null);
     setSelectionEnd(null);
+    setSnapResult(createNoSnapResult());
+    setHysteresisActive(false);
+    setCurrentSnap(null);
     hoveredVerticesRef.current.clear();
 
     // Reset temporary ortho disable state when exiting line mode
     if (orthoTempDisabled) {
       setOrthoTempDisabled(false);
     }
-    redrawAll(null, null);
+    redrawAll(null, createNoSnapResult());
+  };
+  const handleThemeToggle = () => {
+    const newTheme = themeManager.getCurrentTheme() === 'dark' ? 'light' : 'dark';
+    themeManager.setTheme(newTheme);
+    setCurrentTheme(newTheme);
+  
+    const currentColors = themeManager.getCurrentColors();
+
+    // Update render service immediately
+    if (serviceRef.current) {
+      serviceRef.current.setGridConfig({
+        ...gridConfig,
+        color: currentColors.gridColor
+      });
+      serviceRef.current.setOrthoConfig({
+        ...orthoConfig,
+        color: currentColors.orthoColor
+      });
+      serviceRef.current.setCanvasColor(
+        currentColors.canvasColor.r, 
+        currentColors.canvasColor.g, 
+        currentColors.canvasColor.b, 
+        currentColors.canvasColor.a
+      );
+      serviceRef.current.setSelectionColor(
+        currentColors.selectionColor.r,
+        currentColors.selectionColor.g, 
+        currentColors.selectionColor.b, 
+        currentColors.selectionColor.a
+      );
+    }
+
+    // Update all rendering colors from theme
+    setConstraintColor(currentColors.constraintColor);
+    setOrthoConfig(prev => ({ ...prev, color: currentColors.orthoColor }));
+    setGridConfig(prev => ({ ...prev, color: currentColors.gridColor }));
+    setCanvasColor(currentColors.canvasColor);
+    setSelectionColor(currentColors.selectionColor);
+    setLineColor(currentColors.lineColor);
+    setSnapColor(currentColors.snapColor);
+    
+    // Immediate redraw
+    redrawAll(previewEnd, snapResult);
   };
 
 
-  // UI typescript
+
+  ////////// INTERFACE \\\\\\\\\\\
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <canvas
@@ -821,11 +913,11 @@ const App: React.FC = () => {
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onKeyDown={handleKeyDown}
         onContextMenu={handleContextMenu}
         tabIndex={0}
       />
       <UIOverlay
+        key={currentTheme}
         scale={scale}
         debug={debug}
         setDebug={setDebug}
@@ -836,6 +928,8 @@ const App: React.FC = () => {
         orthoTempDisabled={orthoTempDisabled}
         activeTool={activeTool}
         handleToolChange={handleToolChange}
+        onThemeToggle={handleThemeToggle}
+        currentTheme={currentTheme}
       />
     </div>
   );
