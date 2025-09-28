@@ -17,6 +17,7 @@ export interface AppState {
   offsetX: number;
   offsetY: number;
   activeTool: string;
+  // Undoable states
   selectionStart: { x: number; y: number } | null;
   selectionEnd: { x: number; y: number } | null;
   currentStart: { x: number; y: number } | null;
@@ -38,16 +39,31 @@ export class AppStateStore {
   private listeners: Set<(state: AppState) => void> = new Set();
   private maxHistorySize: number = 100;
 
+  // 🎯 Debounce tracking for navigation commands
+  private lastNavigationState: AppState | null = null;
+  private navigationDebounceTimer: number | null = null;
+  private readonly NAVIGATION_DEBOUNCE_MS = 500;
+
+
   constructor(initialState: AppState) {
     this.currentState = initialState;
     console.log('🆕 AppStateStore initialized with', initialState.primitives.length, 'primitives');
   }
 
   // 🎯 MAIN PUBLIC API
+  // Execute command with filtered state for undo
   executeCommand(commandName: string, executeFn: (state: AppState) => AppState): void {
-    // Capture current state for undo
+    // For navigation commands, use debounced version
+    if (this.isNavigationCommand(commandName)) {
+      this.executeNavigationCommand(commandName, executeFn);
+      return;
+    }
+
+    // For regular commands, capture state immediately
+    const stateForUndo = this.getUndoableState(this.currentState);
+    
     this.history.push({
-      state: this.deepCloneState(this.currentState),
+      state: stateForUndo,
       commandName,
       timestamp: Date.now()
     });
@@ -70,6 +86,84 @@ export class AppStateStore {
       primitives: newState.primitives.length
     });
   }
+  private isNavigationCommand(commandName: string): boolean {
+    const navigationCommands = ['zoom', 'pan', 'zoom-in', 'zoom-out', 'reset-zoom'];
+    return navigationCommands.some(cmd => commandName.includes(cmd));
+  }
+
+  // 🎯 Debounced navigation command execution
+  private executeNavigationCommand(commandName: string, executeFn: (state: AppState) => AppState): void {
+    // Cancel previous debounce timer
+    if (this.navigationDebounceTimer !== null) {
+      clearTimeout(this.navigationDebounceTimer);
+    }
+
+    // If we don't have a saved state for this navigation session, capture one
+    if (!this.lastNavigationState) {
+      this.lastNavigationState = this.getUndoableState(this.currentState);
+    }
+
+    // Execute the navigation change immediately
+    const newState = executeFn(this.currentState);
+    this.setState(newState);
+
+    // Set debounce timer to capture undo state
+    this.navigationDebounceTimer = window.setTimeout(() => {
+      if (this.lastNavigationState) {
+        this.history.push({
+          state: this.lastNavigationState,
+          commandName,
+          timestamp: Date.now()
+        });
+
+        // Limit history size
+        if (this.history.length > this.maxHistorySize) {
+          this.history.shift();
+        }
+
+        // Clear redo stack
+        this.future = [];
+
+        console.log(`🎯 Navigation command captured: ${commandName}`, {
+          history: this.history.length,
+          scale: newState.scale,
+          offsetX: newState.offsetX,
+          offsetY: newState.offsetY
+        });
+      }
+
+      // Reset for next navigation session
+      this.lastNavigationState = null;
+      this.navigationDebounceTimer = null;
+    }, this.NAVIGATION_DEBOUNCE_MS);
+  }
+
+  // Get only undoable state (exclude temporary visual states)
+  private getUndoableState(state: AppState): AppState {
+    return {
+      ...state,
+      // KEEP these (undoable):
+      primitives: state.primitives.map(primitive => ({ ...primitive })),
+      selectedPrimitiveIds: [...state.selectedPrimitiveIds],
+      scale: state.scale,
+      offsetX: state.offsetX,
+      offsetY: state.offsetY,
+      activeTool: state.activeTool,
+      
+      // RESET these (not undoable):
+      selectionStart: null,
+      selectionEnd: null,
+      currentStart: null,
+      previewEnd: null,
+      vertexConstraints: [],
+      activeConstraint: null
+    };
+  }
+  // Update temporary states without affecting undo history
+  updateTemporaryState(updates: Partial<AppState>): void {
+    this.currentState = { ...this.currentState, ...updates };
+    this.notifyListeners();
+  }
 
   undo(): void {
     if (this.history.length === 0) {
@@ -79,7 +173,7 @@ export class AppStateStore {
 
     const previous = this.history.pop()!;
     this.future.push({
-      state: this.deepCloneState(this.currentState),
+      state: this.getUndoableState(this.currentState), // Use getUndoableState here too
       commandName: `undo-${previous.commandName}`,
       timestamp: Date.now()
     });
@@ -90,7 +184,6 @@ export class AppStateStore {
 
     this.setState(previous.state);
   }
-
   redo(): void {
     if (this.future.length === 0) {
       console.log('⏩ Nothing to redo');
@@ -99,7 +192,7 @@ export class AppStateStore {
 
     const next = this.future.pop()!;
     this.history.push({
-      state: this.deepCloneState(this.currentState),
+      state: this.getUndoableState(this.currentState), // Use getUndoableState here too
       commandName: `redo-${next.commandName}`,
       timestamp: Date.now()
     });
@@ -115,12 +208,10 @@ export class AppStateStore {
   getState(): AppState {
     return this.currentState;
   }
-
   setState(newState: AppState): void {
     this.currentState = newState;
     this.notifyListeners();
   }
-
   updateState(updates: Partial<AppState>): void {
     this.currentState = { ...this.currentState, ...updates };
     this.notifyListeners();
@@ -167,15 +258,12 @@ export class AppStateStore {
       future: this.future.length
     };
   }
-
   canUndo(): boolean {
     return this.history.length > 0;
   }
-
   canRedo(): boolean {
     return this.future.length > 0;
   }
-
   clearHistory(): void {
     this.history = [];
     this.future = [];

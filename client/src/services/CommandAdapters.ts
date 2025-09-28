@@ -52,52 +52,36 @@ export const CommandAdapters = {
     });
   },
 
-  // 🎯 CONSTRAINT COMMANDS
+  // 🎯 CONSTRAINT COMMANDS (non-undoable)
   setVertexConstraints: (constraints: {x: number, y: number}[]) => {
-    console.log('🎯 CommandAdapters.setVertexConstraints called', constraints);
-    
-    appStateStore.executeCommand('set-vertex-constraints', (state: AppState) => ({
-      ...state,
-      vertexConstraints: constraints
-    }));
+    appStateStore.updateTemporaryState({ vertexConstraints: constraints });
   },
   addVertexConstraint: (vertex: {x: number, y: number}) => {
-    console.log('🎯 CommandAdapters.addVertexConstraint called', vertex);
+    const currentState = appStateStore.getState();
+    const key = `${vertex.x.toFixed(4)},${vertex.y.toFixed(4)}`;
+    const exists = currentState.vertexConstraints.some(v => 
+      `${v.x.toFixed(4)},${v.y.toFixed(4)}` === key
+    );
     
-    appStateStore.executeCommand('add-vertex-constraint', (state: AppState) => {
-      const key = `${vertex.x.toFixed(4)},${vertex.y.toFixed(4)}`;
-      const exists = state.vertexConstraints.some(v => 
-        `${v.x.toFixed(4)},${v.y.toFixed(4)}` === key
-      );
-      
-      if (exists) {
-        // Remove if exists (toggle behavior)
-        return {
-          ...state,
-          vertexConstraints: state.vertexConstraints.filter(v => 
-            `${v.x.toFixed(4)},${v.y.toFixed(4)}` !== key
-          )
-        };
-      } else {
-        // Add if new
-        return {
-          ...state,
-          vertexConstraints: [...state.vertexConstraints, vertex]
-        };
-      }
-    });
+    if (exists) {
+      // Remove if exists (toggle behavior)
+      appStateStore.updateTemporaryState({
+        vertexConstraints: currentState.vertexConstraints.filter(v => 
+          `${v.x.toFixed(4)},${v.y.toFixed(4)}` !== key
+        )
+      });
+    } else {
+      // Add if new
+      appStateStore.updateTemporaryState({
+        vertexConstraints: [...currentState.vertexConstraints, vertex]
+      });
+    }
   },
   clearVertexConstraints: () => {
-    console.log('🎯 CommandAdapters.clearVertexConstraints called');
-    
-    appStateStore.executeCommand('clear-vertex-constraints', (state: AppState) => ({
-      ...state,
-      vertexConstraints: []
-    }));
+    appStateStore.updateTemporaryState({ vertexConstraints: [] });
   },
   setActiveConstraint: (constraint: {x: number, y: number, type: 'horizontal' | 'vertical'} | null) => {
-    // This is temporary state, not undoable
-    appStateStore.updateState({ activeConstraint: constraint });
+    appStateStore.updateTemporaryState({ activeConstraint: constraint });
   },
 
   // 🎯 TOOL COMMANDS
@@ -126,11 +110,26 @@ export const CommandAdapters = {
 
   // 🎯 NAVIGATION COMMANDS
   zoom: (newScale: number, newOffsetX: number, newOffsetY: number) => {
-    console.log('🎯 CommandAdapters.zoom called', { newScale, newOffsetX, newOffsetY });
+    console.log('🎯 CommandAdapters.zoom called (debounced)', { newScale, newOffsetX, newOffsetY });
     
-    appStateStore.executeCommand('zoom', (state: AppState) => ({
+    // Use the debounced navigation command
+    (appStateStore as any).executeNavigationCommand('zoom', (state: AppState) => ({
       ...state,
       scale: newScale,
+      offsetX: newOffsetX,
+      offsetY: newOffsetY
+    }));
+  },
+  panImmediate: (newOffsetX: number, newOffsetY: number) => {
+    // This is temporary during panning - won't create undo points
+    appStateStore.updateTemporaryState({
+      offsetX: newOffsetX,
+      offsetY: newOffsetY
+    });
+  },
+  panFinal: (newOffsetX: number, newOffsetY: number) => {
+    (appStateStore as any).executeNavigationCommand('pan', (state: AppState) => ({
+      ...state,
       offsetX: newOffsetX,
       offsetY: newOffsetY
     }));
@@ -176,16 +175,13 @@ export const CommandAdapters = {
 
   // 🎯 UTILITY: Update preview (non-undoable)
   updatePreview: (previewEnd: { x: number; y: number } | null) => {
-    // This is a temporary state update, not undoable
-    appStateStore.updateState({ previewEnd });
+    appStateStore.updateTemporaryState({ previewEnd });
   },
   updateCurrentStart: (currentStart: { x: number; y: number } | null) => {
-    // This is a temporary state update, not undoable  
-    appStateStore.updateState({ currentStart });
+    appStateStore.updateTemporaryState({ currentStart });
   },
   updateSelectionRect: (start: { x: number; y: number } | null, end: { x: number; y: number } | null) => {
-    // This is a temporary state update, not undoable
-    appStateStore.updateState({ 
+    appStateStore.updateTemporaryState({ 
       selectionStart: start, 
       selectionEnd: end 
     });

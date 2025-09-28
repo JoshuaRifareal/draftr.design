@@ -722,7 +722,8 @@ const App: React.FC = () => {
       const dx = (pos.x - panStart.x) / scale;
       const dy = (pos.y - panStart.y) / scale;
       
-      CommandAdapters.zoom(scale, offsetX + dx, offsetY + dy);
+      // Use immediate pan for smooth interaction
+      CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
       
       setPanStart({ x: pos.x, y: pos.y });
       redrawAll(previewEnd, snapResult);
@@ -811,6 +812,7 @@ const App: React.FC = () => {
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     if (evt.button === 1) {
       setPanStart(null);
+      CommandAdapters.panFinal(offsetX, offsetY);
     }
   };
 
