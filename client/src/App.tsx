@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
-import { snappingService, contextManager, type SnapResult, type SnapType } from './services/SnappingService';
+import { snappingService, contextManager, type SnapType } from './services/SnappingService';
 import { ThemeManager, type Theme } from './services/ThemeManager';
 import { selectionService } from './services/SelectionService';
 import { layerService } from './services/LayerService';

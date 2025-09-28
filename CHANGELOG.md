@@ -6,7 +6,7 @@
 - ✅ Project bootstrapped with **React + TypeScript + Vite** on Windows.  
 - ✅ `wasm-pack` used to build **Rust → WebAssembly (WASM)** module.  
 - ✅ Verified pipeline: Rust → JS glue → React integration.  
-- ✅ Console logs **“Hello from Rust”** successfully.  
+- ✅ Console logs **"Hello from Rust"** successfully.  
 - ✅ **First line drawn** (black, via WebGL2).  
 
 ---
@@ -35,13 +35,49 @@
 
 ---
 
-## Checkpoint #4 – Vertex Snapping, World Coorindates, Zooming and Panning
+## Checkpoint #4 – Vertex Snapping, World Coordinates, Zooming and Panning
 - ✅ Added **soft snapping** to vertices of existing lines:
   - Visual **snap indicator** (red cross) shows when near vertex.
-  - Snap threshold: `20px` (configurable via `SNAP_THRESHOLD`).
+  - Snap threshold: (configurable via `SNAP_THRESHOLD`).
   - Snapping can be **enabled/disabled** (`snapConfig.enabled`).
 - ✅ Preview line respects snapping; finalized lines use snapped positions if near.
 - ✅ Hovering indicator only active in line-drawing mode.
 - ✅ World coordinate system (supports scaling and offset)
 - ✅ Zooming (centered on cursor, smooth and stable)
 - ✅ Panning (middle mouse drag, 1:1 movement, no jumps)
+
+---
+
+## Checkpoint #5 – Advanced Snapping, Command System & Professional UI
+- ✅ **Advanced Snapping System**:
+  - **Orthogonal snapping** (F8 toggle) with configurable angles (0°, 45°, 90°, 135°)
+  - **Constraint snapping** (F9 toggle) with visual guides and cross indicators
+  - **Hysteresis behavior** for stable vertex snapping
+  - **Priority system**: vertex > intersection > constraint > orthogonal
+  - **Shift-key override** for temporary orthogonal mode
+
+- ✅ **Professional Command System**:
+  - **Command palette** (Ctrl+K) with fuzzy search and keyboard navigation
+  - **Tool commands**: Selection, Line, Rectangle, Circle tools
+  - **View commands**: Zoom in/out, reset zoom, clear canvas
+  - **Edit commands**: Delete selected, toggle grid
+  - **Smart undo/redo** with clean state management
+
+- ✅ **Centralized State Management**:
+  - **AppStateStore** with full undo/redo history
+  - **CommandAdapters** bridge between commands and state
+  - **Smart navigation capture** (debounced zoom/pan undo points)
+  - **Visual indicators excluded** from undo history (preview lines, snap points)
+
+- ✅ **Enhanced Rendering & UI**:
+  - **Layer system** with hierarchy and inheritance
+  - **Theme manager** with dark/light mode (F10 toggle)
+  - **Professional UI overlay** with toolbars and panels
+  - **Selection highlighting** with visual feedback
+  - **Grid rendering** with theme-aware colors
+
+- ✅ **Robust Architecture**:
+  - **Clean separation** of concerns (services, components, types)
+  - **Type-safe** throughout with TypeScript interfaces
+  - **Performance optimized** rendering with WebGL
+  - **Modular design** for easy feature extensions
