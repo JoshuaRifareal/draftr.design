@@ -171,7 +171,7 @@ export class LayerService {
         for (const layer of this.layers.values()) {
             if (layer.primitiveIds.has(primitiveId)) {
                 layer.primitiveIds.delete(primitiveId);
-                console.log('➖ Primitive removed from layer:', { primitiveId, fromLayer: layer.id });
+                // console.log('➖ Primitive removed from layer:', { primitiveId, fromLayer: layer.id });
             }
         }
 
@@ -182,9 +182,9 @@ export class LayerService {
                 return false;
             }
             layer.primitiveIds.add(primitiveId);
-            console.log('➕ Primitive assigned to layer:', { primitiveId, toLayer: layerId });
+            // console.log('➕ Primitive assigned to layer:', { primitiveId, toLayer: layerId });
         } else {
-            console.log('👻 Primitive orphaned:', primitiveId);
+            // console.log('👻 Primitive orphaned:', primitiveId);
         }
 
         return true;

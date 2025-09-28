@@ -189,48 +189,81 @@ const App: React.FC = () => {
   }, [serviceRef.current, commandService]);
 
 
+
+
   // Command service initialization 
+  // Advanced optimized version with multiple checks
+  const optimizationStateRef = useRef({
+    primitivesCount: 0,
+    serviceReady: false,
+    commandServiceExists: false
+  });
   useEffect(() => {
     if (serviceRef.current) {
-      const getCurrentState = () => ({
-        primitives: primitives, // ✅ Direct reference (React will provide latest)
-        scale: scale,
-        offsetX: offsetX,
-        offsetY: offsetY,
-        activeTool: activeTool,
-        selectionStart: selectionStart,
-        selectionEnd: selectionEnd,
-        currentStart: currentStart,
-        previewEnd: previewEnd,
-        selectedPrimitiveIds: selectedPrimitiveIds,
-      });
+      const currentState = optimizationStateRef.current;
+      const primitivesChanged = primitives.length !== currentState.primitivesCount;
+      const serviceBecameReady = !currentState.serviceReady;
+      const commandServiceNeedsInit = !currentState.commandServiceExists && !commandService;
+      
+      const shouldRecreate = serviceBecameReady || commandServiceNeedsInit || primitivesChanged;
+      
+      if (shouldRecreate) {
+        const getCurrentState = () => ({
+          primitives: primitives,
+          scale: scale,
+          offsetX: offsetX,
+          offsetY: offsetY,
+          activeTool: activeTool,
+          selectionStart: selectionStart,
+          selectionEnd: selectionEnd,
+          currentStart: currentStart,
+          previewEnd: previewEnd,
+          selectedPrimitiveIds: selectedPrimitiveIds,
+        });
 
-      const context: CommandContext = {
-        renderService: serviceRef.current,
-        snappingService: snappingService,
-        selectionService: selectionService,
-        layerService: layerService,
-        stateSetters: {
-          setPrimitives: (newPrimitives) => {
-            setPrimitives(newPrimitives);
+        const context: CommandContext = {
+          renderService: serviceRef.current,
+          snappingService: snappingService,
+          selectionService: selectionService,
+          layerService: layerService,
+          stateSetters: {
+            setPrimitives: (newPrimitives) => {
+              console.log('🔧 setPrimitives called from command:', newPrimitives.length);
+              setPrimitives(newPrimitives);
+            },
+            setScale,
+            setOffsetX,
+            setOffsetY,
+            setActiveTool: setActiveTool as (tool: string) => void,
+            setSelectionStart,
+            setSelectionEnd,
+            setCurrentStart,
+            setPreviewEnd,
+            setSelectedPrimitiveIds,
           },
-          setScale,
-          setOffsetX,
-          setOffsetY,
-          setActiveTool: setActiveTool as (tool: string) => void,
-          setSelectionStart,
-          setSelectionEnd,
-          setCurrentStart,
-          setPreviewEnd,
-          setSelectedPrimitiveIds,
-        },
-        getCurrentState
-      };
+          getCurrentState
+        };
+          
+        const newCommandService = new CommandService(context, layerService);
+        setCommandService(newCommandService);
         
-      const newCommandService = new CommandService(context, layerService);
-      setCommandService(newCommandService);
+        // Update optimization state
+        optimizationStateRef.current = {
+          primitivesCount: primitives.length,
+          serviceReady: true,
+          commandServiceExists: true
+        };
+        
+        console.log('⚡ CommandService advanced optimization', {
+          reason: serviceBecameReady ? 'service ready' : 
+                  commandServiceNeedsInit ? 'first init' : 
+                  'primitives changed',
+          oldCount: currentState.primitivesCount,
+          newCount: primitives.length
+        });
+      }
     }
-  }, [serviceRef.current, primitives.length]);
+  }, [serviceRef.current, primitives.length, commandService]);
   
   // Subsrcibe and unsubscribe from command dispatcher
   useEffect(() => {
@@ -245,6 +278,8 @@ const App: React.FC = () => {
     
     return unsubscribe;
   }, [commandService]);
+
+
 
 
   // Register lines with selection service
@@ -531,7 +566,7 @@ const App: React.FC = () => {
   
     // Activate or deactivate hysteresis
     if (result.type === 'vertex') {
-      console.log("🚀 Hysteresis activated")
+      // console.log("🚀 Hysteresis activated")
       setHysteresisActive(true);
       setCurrentSnap({
         type: result.type,
@@ -540,7 +575,7 @@ const App: React.FC = () => {
       });
     } else {
       if (hysteresisActive) {
-        console.log('🔄 Clearing hysteresis');
+        // console.log('🔄 Hysteresis cleared');
         setHysteresisActive(false);
         setCurrentSnap(null);
       }
