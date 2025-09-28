@@ -48,9 +48,18 @@ export interface RedrawParams {
 
 export class RenderService {
   private renderer: Renderer;
+  private selectionHighlightColor = { r: 0.53, g: 0.81, b: 0.98, a: 1.0 }; // Default
+  private selectionHandleColor = { r: 0.53, g: 0.81, b: 0.98, a: 1.0 };    // Default
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
+  }
+
+  setSelectionHighlightColor(color: { r: number; g: number; b: number; a: number }): void {
+    this.selectionHighlightColor = color;
+  }
+  setSelectionHandleColor(color: { r: number; g: number; b: number; a: number }): void {
+    this.selectionHandleColor = color;
   }
 
   // Drawing Primitives
@@ -222,13 +231,23 @@ export class RenderService {
   private drawLineSelection(lineData: number[]): void {
     const [x1, y1, x2, y2] = lineData;
     
+    // Use theme-aware colors
+    const highlightColor = this.selectionHighlightColor;
+    const handleColor = this.selectionHandleColor;
+
     // Draw line in selection color (light blue)
-    this.drawLine(x1, y1, x2, y2, 0.53, 0.81, 0.98, 1.0);
+    this.drawLine(x1, y1, x2, y2, 
+      highlightColor.r, highlightColor.g, 
+      highlightColor.b, highlightColor.a);
     
     // Draw endpoint handles
-    const handleRadius = 4;
-    this.drawCircle(x1, y1, handleRadius, 0.53, 0.81, 0.98, 1.0, 16, true);
-    this.drawCircle(x2, y2, handleRadius, 0.53, 0.81, 0.98, 1.0, 16, true);
+    const handleRadius = SNAP_INDICATOR_RADIUS;
+    this.drawCircle(x1, y1, handleRadius, 
+      handleColor.r, handleColor.g, 
+      handleColor.b, handleColor.a, 16, true);
+    this.drawCircle(x2, y2, handleRadius, 
+      handleColor.r, handleColor.g, 
+      handleColor.b, handleColor.a, 16, true);
   }
   private groupPrimitivesByLayer(primitives: Primitive[]): Map<string, Primitive[]> {
     const grouped = new Map<string, Primitive[]>();

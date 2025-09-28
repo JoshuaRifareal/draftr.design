@@ -9,6 +9,8 @@ export interface ThemeColors {
   selectionColor: { r: number; g: number; b: number; a: number };
   lineColor: { r: number; g: number; b: number; a: number };
   snapColor: { r: number; g: number; b: number; a: number };
+  selectionHighlightColor: { r: number; g: number; b: number; a: number };
+  selectionHandleColor: { r: number; g: number; b: number; a: number };
 
   // CSS Variables (for UIOverlay.css)
   cssVariables: {
@@ -55,6 +57,8 @@ export class ThemeManager {
       selectionColor: { r: 0.0, g: 0.0, b: 1.0, a: 0.25 },
       lineColor: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }, // White lines
       snapColor: { r: 1.0, g: 0.8, b: 0.0, a: 1.0 },
+      selectionHighlightColor: { r: 0.53, g: 0.81, b: 0.98, a: 1.0 }, // Light blue
+      selectionHandleColor: { r: 0.53, g: 0.81, b: 0.98, a: 1.0 },    // Same for handles
       
       cssVariables: {
         '--mainMenu-bg': '#1c1c1e',
@@ -87,6 +91,8 @@ export class ThemeManager {
       selectionColor: { r: 0.0, g: 0.0, b: 1.0, a: 0.50 },
       lineColor: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Black lines
       snapColor: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+      selectionHighlightColor: { r: 0.0, g: 0.4, b: 0.8, a: 1.0 },   // Darker blue
+      selectionHandleColor: { r: 0.0, g: 0.4, b: 0.8, a: 1.0 },      // Same for handles
       
       cssVariables: {
         '--mainMenu-bg': '#d6d6d9',

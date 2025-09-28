@@ -94,6 +94,11 @@ const App: React.FC = () => {
   const [canvasColor, setCanvasColor] = useState(CANVAS_COLOR);
   const [selectionColor, setSelectionColor] = useState(SELECTION_COLOR);
 
+  // Selection highlight colors
+  const initialColors = themeManager.getCurrentColors();
+  const [selectionHighlightColor, setSelectionHighlightColor] = useState(initialColors.selectionHighlightColor);
+  const [selectionHandleColor, setSelectionHandleColor] = useState(initialColors.selectionHandleColor);
+
   // Window resize state
   const [canvasSize, setCanvasSize] = useState<{ w: number; h: number }>({
     w: typeof window !== "undefined" ? window.innerWidth : 650,
@@ -372,7 +377,8 @@ const App: React.FC = () => {
       lineColor, snapColor, snapResult, orthoConfig, 
       shiftHeld, orthoSnapEnabled, orthoTempDisabled, 
       vertexConstraints, activeConstraint, gridConfig, 
-      canvasColor, selectionColor, currentTheme]);
+      canvasColor, selectionColor, currentTheme, 
+      selectionHighlightColor, selectionHandleColor]);
 
   // Custom debug logger
   const logDebug = (...args: any[]) => {
@@ -883,6 +889,8 @@ const App: React.FC = () => {
         currentColors.selectionColor.b, 
         currentColors.selectionColor.a
       );
+      serviceRef.current.setSelectionHighlightColor(currentColors.selectionHighlightColor);
+      serviceRef.current.setSelectionHandleColor(currentColors.selectionHandleColor);
     }
 
     // Update all rendering colors from theme
@@ -893,6 +901,8 @@ const App: React.FC = () => {
     setSelectionColor(currentColors.selectionColor);
     setLineColor(currentColors.lineColor);
     setSnapColor(currentColors.snapColor);
+    setSelectionHighlightColor(currentColors.selectionHighlightColor);
+    setSelectionHandleColor(currentColors.selectionHandleColor);
     
     // Immediate redraw
     redrawAll(previewEnd, snapResult);
