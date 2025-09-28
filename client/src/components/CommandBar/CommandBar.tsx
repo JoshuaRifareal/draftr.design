@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import './CommandBar.css';
 import { useCommandBar } from './useCommandBar';
 import { type Command } from './commands';
+import { commandDispatcher } from '../../services/CommandDispatcher';
 
 interface CommandBarProps {
   onCommandSelect: (command: Command) => void;
@@ -46,7 +47,6 @@ export const CommandBar: React.FC<CommandBarProps> = ({ onCommandSelect }) => {
   const handleCommandSelect = (command: Command) => {
     onCommandSelect(command);
     closeCommandBar();
-    command.action();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

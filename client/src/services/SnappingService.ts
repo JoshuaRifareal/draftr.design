@@ -6,6 +6,7 @@
 // 5. Intersection detection
 // 6. Temporary state management
 
+import type { DrawingPrimitive } from '../types/draftrTypes';
 
 // ===== INTERFACES AND TYPES =====
 export type SnapType = 
@@ -41,7 +42,7 @@ export interface SnappingConfig {
 }
 
 export interface SnappingContext {
-  lines: number[][];
+  primitives: DrawingPrimitive[];
   vertexConstraints: { x: number; y: number }[];
   activeConstraint: { x: number; y: number; type: 'horizontal' | 'vertical' } | null;
   currentStart: { x: number; y: number } | null;
@@ -150,8 +151,14 @@ export class DefaultSnappingService implements ISnappingService {
     let closest: { x: number; y: number } | null = null;
     let minDist = this.config.thresholdPx;
   
+    // Extract line data from primitives
+    // Filter for line primitives and get their data arrays
+    const linePrimitives = context.primitives.filter(prim => prim.type === 'line');
+    
     // Check all line endpoints in SCREEN SPACE
-    for (const line of context.lines.slice(0, context.lines.length - 1)) {
+    for (const primitive of linePrimitives) {
+      const line = primitive.data;
+      
       const pts = [
         { x: line[0], y: line[1] },
         { x: line[2], y: line[3] },
