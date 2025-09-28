@@ -1,4 +1,4 @@
-# draftr.design# 🚀 draftr
+# 🚀 draftr.design
 
 **Precision CAD, reimagined for the web.**  
 A performant, modern CAD application built with Rust & WebAssembly for buttery-smooth drafting in your browser.
