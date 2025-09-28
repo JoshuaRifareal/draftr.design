@@ -4,12 +4,11 @@ import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
 import { snappingService, contextManager, type SnapResult, type SnapType } from './services/SnappingService';
 import { ThemeManager, type Theme } from './services/ThemeManager';
-import { CommandService, type CommandContext } from './services/CommandService';
-import { commandDispatcher, type CommandEvent } from './services/CommandDispatcher';
 import { selectionService } from './services/SelectionService';
 import { layerService } from './services/LayerService';
+import { appStateStore, type AppState } from './services/AppStateStore';
+import { CommandAdapters } from './services/CommandAdapters';
 import type { DrawingPrimitive } from './types/draftrTypes';
-
 
 // INTERFACES
 interface SnapResult {
@@ -19,7 +18,6 @@ interface SnapResult {
   metadata?: any;
 }
 
-
 // Default Variables
 const SNAP_THRESHOLD = 25; // px
 const ORTHO_COLOR = { r: 0, g: 255, b: 0, a: 1.0 };
@@ -27,12 +25,12 @@ const ORTHO_DASH_PX = 8;
 const ORTHO_GAP_PX = 6;
 const ORTHO_THICKNESS_PX = 1;
 const ORTHO_THRESHOLD_DEG = 5;
-const ORTHO_ANGLES_DEG = [0, 45, 90, 135]; // can be changed at runtime
+const ORTHO_ANGLES_DEG = [0, 45, 90, 135];
 const GRID_COLOR = { r: 0, g: 0, b: 0, a: 0.1 };
 const GRID_SPACING_MIN_PX = 25.0;
 const GRID_SPACING_MAX_PX = 50.0;
-const CANVAS_COLOR = { r: 0.17, g: 0.17, b: 0.19, a: 1.0 }; // Black with slight alpha
-const SELECTION_COLOR = { r: 0.0, g: 0.0, b: 1.0, a: 0.25 }; // Blue with 40% alpha
+const CANVAS_COLOR = { r: 0.17, g: 0.17, b: 0.19, a: 1.0 };
+const SELECTION_COLOR = { r: 0.0, g: 0.0, b: 1.0, a: 0.25 };
 
 
 const App: React.FC = () => {
@@ -40,44 +38,37 @@ const App: React.FC = () => {
   const serviceRef = useRef<RenderService | null>(null);
   const [debug, setDebug] = useState(true);
 
-  // Command service setup
-  const [commandService, setCommandService] = useState<CommandService | null>(null);
-
   // Selection service setup
-  const [selectedPrimitiveIds, setSelectedPrimitiveIds] = useState<string[]>([]);
   const [shiftHeldForSelection, setShiftHeldForSelection] = useState(false);
 
-  // Initialize theme manager amd color configurations
+  // Initialize theme manager and color configurations
   const themeManager = useRef(new ThemeManager()).current;
   const [currentTheme, setCurrentTheme] = useState<Theme>('dark');
   const [lineColor, setLineColor] = useState({ r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
   const [snapColor, setSnapColor] = useState({ r: 1.0, g: 0.8, b: 0.0, a: 1.0 });
 
-  // Tool types and states
+  // Tool types
   type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE';
-  const [activeTool, setActiveTool] = useState<ToolType>('SELECTION');
-  const [selectionStart, setSelectionStart] = useState<{ x: number; y: number } | null>(null);
-  const [selectionEnd, setSelectionEnd] = useState<{ x: number; y: number } | null>(null);
-
-  // Line drawing state and style configuration
-  // const [lines, setLines] = useState<number[][]>([]);
-  const [primitives, setPrimitives] = useState<DrawingPrimitive[]>([]);
-  const [currentStart, setCurrentStart] = useState<{ x: number; y: number } | null>(null);
-  const [previewEnd, setPreviewEnd] = useState<{ x: number; y: number } | null>(null);
-  const [snapConfig] = useState({ enabled: true });
 
   // Pan/zoom state
-  const [scale, setScale] = useState(1);
-  const [offsetX, setOffsetX] = useState(0);
-  const [offsetY, setOffsetY] = useState(0);
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
 
-  // Snap states
-  const [snapResult, setSnapResult] = useState<SnapResult>({
-    position: { x: 0, y: 0 },
-    type: 'none',
-    strength: 0
-  });
+  // NEW: USING APPSTATESTORE
+  const [appState, setAppState] = useState<AppState>(appStateStore.getState());
+  const {
+    primitives,
+    selectedPrimitiveIds,
+    scale,
+    offsetX,
+    offsetY,
+    activeTool,
+    selectionStart,
+    selectionEnd,
+    currentStart,
+    previewEnd,
+    vertexConstraints,
+    activeConstraint
+  } = appState;
 
   // Runtime orthogonal configuration
   const [orthoConfig, setOrthoConfig] = useState({
@@ -115,9 +106,13 @@ const App: React.FC = () => {
     position: { x: number; y: number };
     strength: number;
   } | null>(null);
+  const [snapResult, setSnapResult] = useState<SnapResult>({
+    position: { x: 0, y: 0 },
+    type: 'none',
+    strength: 0
+  });
+  const [snapConfig] = useState({ enabled: true });
   const [hysteresisActive, setHysteresisActive] = useState(false);
-
-  // No snap result helper function
   const createNoSnapResult = (): SnapResult => ({
     position: { x: 0, y: 0 },
     type: 'none',
@@ -136,16 +131,11 @@ const App: React.FC = () => {
   // Temporarily disabling constraint snapping based on vertex priority
   const [constraintTempDisabled, setConstraintTempDisabled] = useState(false);
 
-  // Vertex constraint state
-  const [vertexConstraints, setVertexConstraints] = useState<{x: number, y: number}[]>([]);
-  const [activeConstraint, setActiveConstraint] = useState<{x: number, y: number, type: 'horizontal' | 'vertical'} | null>(null);
-
   // Track hovered vertices for constraint toggling
   const hoveredVerticesRef = useRef<Set<string>>(new Set());
 
 
-
-  ////////// INITIALIZAION \\\\\\\\\\\
+  ////////// INITIALIZATION \\\\\\\\\\
   useEffect(() => {
     const run = async () => {
       await init();
@@ -181,106 +171,23 @@ const App: React.FC = () => {
   // Expose services to global scope for console testing
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      (window as any).themeManager = themeManager;
       (window as any).layerService = layerService;
       (window as any).selectionService = selectionService;
       (window as any).renderService = serviceRef.current;
-      (window as any).commandService = commandService;
+      (window as any).appStateStore = appStateStore;
+      (window as any).CommandAdapters = CommandAdapters;
+      (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
     }
-  }, [serviceRef.current, commandService]);
+  }, [serviceRef.current]);
 
-
-
-
-  // Command service initialization 
-  // Advanced optimized version with multiple checks
-  const optimizationStateRef = useRef({
-    primitivesCount: 0,
-    serviceReady: false,
-    commandServiceExists: false
-  });
+  // Subscribe to AppStateStore changes
   useEffect(() => {
-    if (serviceRef.current) {
-      const currentState = optimizationStateRef.current;
-      const primitivesChanged = primitives.length !== currentState.primitivesCount;
-      const serviceBecameReady = !currentState.serviceReady;
-      const commandServiceNeedsInit = !currentState.commandServiceExists && !commandService;
-      
-      const shouldRecreate = serviceBecameReady || commandServiceNeedsInit || primitivesChanged;
-      
-      if (shouldRecreate) {
-        const getCurrentState = () => ({
-          primitives: primitives,
-          scale: scale,
-          offsetX: offsetX,
-          offsetY: offsetY,
-          activeTool: activeTool,
-          selectionStart: selectionStart,
-          selectionEnd: selectionEnd,
-          currentStart: currentStart,
-          previewEnd: previewEnd,
-          selectedPrimitiveIds: selectedPrimitiveIds,
-        });
-
-        const context: CommandContext = {
-          renderService: serviceRef.current,
-          snappingService: snappingService,
-          selectionService: selectionService,
-          layerService: layerService,
-          stateSetters: {
-            setPrimitives: (newPrimitives) => {
-              console.log('🔧 setPrimitives called from command:', newPrimitives.length);
-              setPrimitives(newPrimitives);
-            },
-            setScale,
-            setOffsetX,
-            setOffsetY,
-            setActiveTool: setActiveTool as (tool: string) => void,
-            setSelectionStart,
-            setSelectionEnd,
-            setCurrentStart,
-            setPreviewEnd,
-            setSelectedPrimitiveIds,
-          },
-          getCurrentState
-        };
-          
-        const newCommandService = new CommandService(context, layerService);
-        setCommandService(newCommandService);
-        
-        // Update optimization state
-        optimizationStateRef.current = {
-          primitivesCount: primitives.length,
-          serviceReady: true,
-          commandServiceExists: true
-        };
-        
-        console.log('⚡ CommandService advanced optimization', {
-          reason: serviceBecameReady ? 'service ready' : 
-                  commandServiceNeedsInit ? 'first init' : 
-                  'primitives changed',
-          oldCount: currentState.primitivesCount,
-          newCount: primitives.length
-        });
-      }
-    }
-  }, [serviceRef.current, primitives.length, commandService]);
-  
-  // Subsrcibe and unsubscribe from command dispatcher
-  useEffect(() => {
-    if (!commandService) return;
-    
-    const unsubscribe = commandDispatcher.subscribe((event: CommandEvent) => {
-      if (event.type === 'EXECUTE_COMMAND') {
-        commandService.execute(event.commandId, event.params)
-          .catch((error: Error) => console.error('Command failed:', error));
-      }
+    const unsubscribe = appStateStore.subscribe((newState: AppState) => {
+      setAppState(newState);
     });
-    
     return unsubscribe;
-  }, [commandService]);
-
-
-
+  }, []);
 
   // Register lines with selection service
   useEffect(() => {
@@ -359,13 +266,12 @@ const App: React.FC = () => {
   // Keyboard listeners
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F8" || e.key === "F9" || e.key === "F10") {
+      if (e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "Escape") {
         e.preventDefault();
       }
 
       if (e.key === "Shift") setShiftHeld(true);
       if (e.key === "F8") {
-        e.preventDefault();
         const newOrthoEnabled = !orthoSnapEnabled;
         setOrthoSnapEnabled(newOrthoEnabled);
         
@@ -376,7 +282,6 @@ const App: React.FC = () => {
         logDebug("Ortho snap toggled:", newOrthoEnabled);
       }
       if (e.key === "F9") {
-        e.preventDefault();
         const newConstraintEnabled = !snappingService.getConfig().constraintEnabled;
         
         snappingService.updateConfig({ 
@@ -384,40 +289,37 @@ const App: React.FC = () => {
         });
 
         if (!newConstraintEnabled) {
-          setVertexConstraints([]);
-          setActiveConstraint(null);
+          CommandAdapters.clearVertexConstraints();
+          CommandAdapters.setActiveConstraint(null);
           hoveredVerticesRef.current.clear();
         }
         logDebug("Constraint snap toggled:", newConstraintEnabled);
       }
       if (e.key === "F10") {
-        e.preventDefault();
+        e.stopPropagation(); 
         handleThemeToggle();
+        return; 
       }
       if (e.key === "Escape") {
-        setSelectedPrimitiveIds([]);
+        CommandAdapters.setSelection([]);
+        CommandAdapters.setActiveTool('SELECTION');
         resetTool();
-        setActiveTool('SELECTION');
       }
       if (e.ctrlKey || e.metaKey) {
         if (e.key === "z" || e.key === "Z") {
           e.preventDefault();
-          if (commandService) {
-            if (e.shiftKey) {
-              commandService.redo(); // Ctrl+Shift+Z for redo
-              console.log("🔁 Redo triggered");
-            } else {
-              commandService.undo(); // Ctrl+Z for undo
-              console.log("⏪ Undo triggered");
-            }
+          if (e.shiftKey) {
+            appStateStore.redo(); // Ctrl+Shift+Z for redo
+            console.log("🔁 Redo triggered");
+          } else {
+            appStateStore.undo(); // Ctrl+Z for undo
+            console.log("⏪ Undo triggered");
           }
         }
         if (e.key === "y" || e.key === "Y") {
           e.preventDefault();
-          if (commandService) {
-            commandService.redo(); // Ctrl+Y for redo
-            console.log("🔁 Redo triggered");
-          }
+          appStateStore.redo(); // Ctrl+Y for redo
+          console.log("🔁 Redo triggered");
         }
       }
     };
@@ -431,7 +333,7 @@ const App: React.FC = () => {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [commandService, orthoSnapEnabled]);
+  }, [orthoSnapEnabled]);
 
   // Zoom functionality
   useEffect(() => {
@@ -441,32 +343,27 @@ const App: React.FC = () => {
     const handleWheel = (evt: WheelEvent) => {
       evt.preventDefault();
       const pos = getMousePos(evt);
-
+    
       const oldScale = scale;
       const oldOffsetX = offsetX;
       const oldOffsetY = offsetY;
-
+    
       const worldBeforeX = pos.x / oldScale - oldOffsetX;
       const worldBeforeY = pos.y / oldScale - oldOffsetY;
-
+    
       const delta = -evt.deltaY * 0.001;
       let newScale = oldScale * (1 + delta);
-
       newScale = Math.max(0.05, Math.min(20000, newScale));
-
+    
       const newOffsetX = pos.x / newScale - worldBeforeX;
       const newOffsetY = pos.y / newScale - worldBeforeY;
-
-      setScale(newScale);
-      setOffsetX(newOffsetX);
-      setOffsetY(newOffsetY);
-
-      redrawAll(previewEnd, snapResult);
+    
+      CommandAdapters.zoom(newScale, newOffsetX, newOffsetY);
     };
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [scale, offsetX, offsetY, previewEnd, primitives, currentStart, debug, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled]);
+  }, [scale, offsetX, offsetY]);
 
   // Redraw all states
   useEffect(() => {
@@ -509,16 +406,7 @@ const App: React.FC = () => {
   // Toggle vertex constraint
   const toggleVertexConstraint = (vertex: { x: number; y: number } | null | undefined) => {
     if (!vertex) return;
-    
-    const key = getVertexKey(vertex);
-    setVertexConstraints(prev => {
-      const exists = prev.some(v => getVertexKey(v) === key);
-      if (exists) {
-        return prev.filter(v => getVertexKey(v) !== key);
-      } else {
-        return [...prev, vertex];
-      }
-    });
+    CommandAdapters.addVertexConstraint(vertex);
   };
 
   // Snapping logic
@@ -530,14 +418,14 @@ const App: React.FC = () => {
         strength: 0
       };
       setSnapResult(result);
-      setActiveConstraint(null);
+      CommandAdapters.setActiveConstraint(null);
       setHysteresisActive(false);
       setCurrentSnap(null);
       return result;
     }
   
     const result = snappingService.findSnap(pos, contextManager.getContext());
-  
+
     // Hysteresis state management
     if (hysteresisActive && currentSnap?.type === 'vertex') {
       const cursorScreen = pos;
@@ -566,7 +454,6 @@ const App: React.FC = () => {
   
     // Activate or deactivate hysteresis
     if (result.type === 'vertex') {
-      // console.log("🚀 Hysteresis activated")
       setHysteresisActive(true);
       setCurrentSnap({
         type: result.type,
@@ -575,7 +462,6 @@ const App: React.FC = () => {
       });
     } else {
       if (hysteresisActive) {
-        // console.log('🔄 Hysteresis cleared');
         setHysteresisActive(false);
         setCurrentSnap(null);
       }
@@ -583,13 +469,13 @@ const App: React.FC = () => {
   
     // Handle constraint state
     if (result.type === 'constraint' && result.metadata?.constraint) {
-      setActiveConstraint(result.metadata.constraint);
+      CommandAdapters.setActiveConstraint(result.metadata.constraint);
     } else if (result.type === 'intersection' && result.metadata?.constraint) {
-      setActiveConstraint(result.metadata.constraint);
+      CommandAdapters.setActiveConstraint(result.metadata.constraint);
     } else if (result.type === 'vertex') {
-      setActiveConstraint(null);
+      CommandAdapters.setActiveConstraint(null);
     } else {
-      setActiveConstraint(null);
+      CommandAdapters.setActiveConstraint(null);
     }
   
     // Handle temporary disabling
@@ -608,6 +494,7 @@ const App: React.FC = () => {
         setConstraintTempDisabled(false);
       }
     }
+
     setSnapResult(result);
     return result;
   };
@@ -645,6 +532,7 @@ const App: React.FC = () => {
 
     return { angle: bestCandidate, base: bestBase, diff: bestDiff };
   };
+
   const applyOrthoConstraint = (start: { x: number; y: number }, cursorWorld: { x: number; y: number }) => {
     const nearest = nearestOrthoAngleDeg(start, cursorWorld);
     if (nearest.diff > orthoConfig.thresholdDeg) return null;
@@ -676,7 +564,7 @@ const App: React.FC = () => {
     service.redrawAll(preview, snapResult, {
       offsetX, offsetY, scale,
       activeTool, 
-      activeConstraint, 
+      activeConstraint,
       constraintColor,
       currentStart, 
       orthoConfig, 
@@ -691,9 +579,7 @@ const App: React.FC = () => {
     });
   };
 
-
-
-  ////////// INTERACTION \\\\\\\\\\\
+  ////////// INTERACTION \\\\\\\\\\
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
     const worldPos = screenToWorld(pos.x, pos.y);
@@ -711,46 +597,49 @@ const App: React.FC = () => {
         intersectionSnap = snapResult.type === 'intersection' ? snapResult.position : null;
       }
 
-      // Selection tool capture cursor
+      // Selection tool
       if (activeTool === 'SELECTION') {
-        if (selectionStart === null) {
-          setSelectionStart(worldPos);
-          setSelectionEnd(worldPos);
-
-          // Clear previous selection if not holding shift
-          if (!shiftHeld) {
-            setSelectedPrimitiveIds([]);
-          }
+        const worldPos = screenToWorld(pos.x, pos.y);
+        
+        if (!selectionStart) {
+          // First click - start selection rectangle
+          CommandAdapters.updateSelectionRect(worldPos, worldPos);
           setShiftHeldForSelection(shiftHeld);
         } else {
-          setSelectionEnd(worldPos);
+          // Second click - finalize selection
+          const result = selectionService.selectByRectangle(
+            selectionStart, 
+            worldPos, 
+            [] // Start with empty selection for new rectangle
+          );
+      
+          let newSelection: string[];
           
-          // Finalize selection
-          if (selectionStart && selectionEnd) {
-            const result = selectionService.selectByRectangle(
-              selectionStart, 
-              selectionEnd, 
-              shiftHeldForSelection ? selectedPrimitiveIds : []
-            );
-
-            // console.log('Selected IDs:', result.selectedIds);
-            setSelectedPrimitiveIds(result.selectedIds);
+          if (shiftHeldForSelection) {
+            // SHIFT HELD: Subtract from current selection
+            newSelection = selectedPrimitiveIds.filter(id => !result.selectedIds.includes(id));
+            console.log(`🗑️ Subtracting ${result.selectedIds.length} from selection`);
+          } else {
+            // NO SHIFT: Add to current selection (always additive)
+            const combined = new Set([...selectedPrimitiveIds, ...result.selectedIds]);
+            newSelection = Array.from(combined);
+            console.log(`➕ Adding ${result.selectedIds.length} to selection`);
           }
-
-          setSelectionStart(null);
-          setSelectionEnd(null);
-          resetTool();
+      
+          CommandAdapters.setSelection(newSelection);
+          CommandAdapters.updateSelectionRect(null, null); // Reset selection rectangle
         }
         return;
       }
 
-      // Rectangle tool define corners
+      // Rectangle tool
       if (activeTool === 'RECTANGLE') {
         const cursorWorld = snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y);
 
         if (!currentStart) {
           // First corner
-          setCurrentStart(cursorWorld);
+          CommandAdapters.updateCurrentStart(cursorWorld);
+          CommandAdapters.updatePreview(cursorWorld);
         } else {
           // Finalize rectangle
           const newPrimitive: DrawingPrimitive = {
@@ -760,112 +649,97 @@ const App: React.FC = () => {
                    lineColor.r, lineColor.g, lineColor.b, lineColor.a],
             layerId: layerService.getActiveLayerId()
           };
-          setPrimitives(prev => [...prev, newPrimitive]);
-
-          resetTool();
-          setCurrentStart(null);
-          setPreviewEnd(null);
-          setSelectionStart(null);
-          setSelectionEnd(null);
-          setVertexConstraints([]);
-          setActiveConstraint(null);
-          hoveredVerticesRef.current.clear();
+          
+          CommandAdapters.drawRectangle(newPrimitive);
+          CommandAdapters.updateCurrentStart(null);
+          CommandAdapters.updatePreview(null);
         }
         return;
       }
 
-      // Draw Preview Line
-      if (previewEnd) {
-        // Use previewEnd if available
-        finalPos = previewEnd;
-      } else if (shiftHeld && previewEnd) {
-        // Endpoint is constrained to lie along the guideline
-        finalPos = previewEnd;
-      } else if (!shiftHeld && currentStart && shouldUseOrthoSnapping()) {
-        const cursorWorld = screenToWorld(pos.x, pos.y);
-        const constrained = applyOrthoConstraint(currentStart, cursorWorld);
-        if (constrained) {
-          finalPos = { x: constrained.x, y: constrained.y };
-        }
-      }
-
-      // Draw Line - FIXED VERSION
-      if (!currentStart) {
+      // Line tool
+      if (activeTool === 'LINE') {
         if (activeLayer && activeLayer.properties.locked) {
           console.warn("🚫 Cannot draw on locked layer:", activeLayer.name);
           return; 
         }
-        setCurrentStart(finalPos);
-      } else {
-        const newPrimitive: DrawingPrimitive = {
-          id: `primitive-${crypto.randomUUID()}`,
-          type: 'line',
-          data: [currentStart.x, currentStart.y, finalPos.x, finalPos.y, 
-                lineColor.r, lineColor.g, lineColor.b, lineColor.a],
-          layerId: layerService.getActiveLayerId()
-        };
 
-        // ALWAYS use command service when available
-        if (commandService) {
-          commandService.execute('draw-line', { primitive: newPrimitive })
-            .then(() => {
-              console.log('✅ Line drawn via command system');
-            })
-            .catch(error => {
-              console.error('❌ Command failed, falling back to direct state:', error);
-              // Fallback: update state directly if command fails
-              setPrimitives(prev => [...prev, newPrimitive]);
-            });
-        } else {
-          console.log('⚡ Using direct state (fallback)');
-          setPrimitives(prev => [...prev, newPrimitive]);
+        // Draw Preview Line
+        if (previewEnd) {
+          // Use previewEnd if available
+          finalPos = previewEnd;
+        } else if (shiftHeld && previewEnd) {
+          // Endpoint is constrained to lie along the guideline
+          finalPos = previewEnd;
+        } else if (!shiftHeld && currentStart && shouldUseOrthoSnapping()) {
+          const cursorWorld = screenToWorld(pos.x, pos.y);
+          const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+          if (constrained) {
+            finalPos = { x: constrained.x, y: constrained.y };
+          }
         }
 
-        setCurrentStart(finalPos);
-        setPreviewEnd(null);
+        // Draw Line
+        if (!currentStart) {
+          CommandAdapters.updateCurrentStart(finalPos);
+        } else {
+          const newPrimitive: DrawingPrimitive = {
+            id: `primitive-${crypto.randomUUID()}`,
+            type: 'line',
+            data: [currentStart.x, currentStart.y, finalPos.x, finalPos.y, 
+                  lineColor.r, lineColor.g, lineColor.b, lineColor.a],
+            layerId: layerService.getActiveLayerId()
+          };
 
-        // Clear constraints when finalizing an endpoint
-        setVertexConstraints([]);
-        setActiveConstraint(null);
-        hoveredVerticesRef.current.clear();
+          CommandAdapters.drawLine(newPrimitive);
+          CommandAdapters.updateCurrentStart(finalPos);
+          CommandAdapters.updatePreview(null);
+
+          // Clear constraints when finalizing an endpoint
+          CommandAdapters.clearVertexConstraints();
+          CommandAdapters.setActiveConstraint(null);
+          hoveredVerticesRef.current.clear();
+        }
+        return;
       }
           
     } else if (evt.button === 1) {
       setPanStart({ x: pos.x, y: pos.y });
     }
   };
+
   const handleMouseMove = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
-    const currentSnapResult = findSnap(pos);
-    const constraintSnap = currentSnapResult.type === 'constraint' ? currentSnapResult.position : null;
+    const snapResult = findSnap(pos);
+    const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
     const cursorWorld = constraintSnap ?? 
-                       (currentSnapResult.type !== 'none' ? currentSnapResult.position : screenToWorld(pos.x, pos.y));
-    const intersectionSnap = currentSnapResult.type === 'intersection' ? currentSnapResult.position : null;
+                       (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
+    const intersectionSnap = snapResult.type === 'intersection' ? snapResult.position : null;
     let preview = cursorWorld;
-
 
     // Panning functionality
     if (panStart) {
       const dx = (pos.x - panStart.x) / scale;
       const dy = (pos.y - panStart.y) / scale;
-      setOffsetX((ox) => ox + dx);
-      setOffsetY((oy) => oy + dy);
+      
+      CommandAdapters.zoom(scale, offsetX + dx, offsetY + dy);
+      
       setPanStart({ x: pos.x, y: pos.y });
-      redrawAll(previewEnd, currentSnapResult);
+      redrawAll(previewEnd, snapResult);
       return;
     }
 
     // Selection rectangle
     if (activeTool === 'SELECTION' && selectionStart) {
       const cursorWorld = screenToWorld(pos.x, pos.y);
-      setSelectionEnd(cursorWorld);
-      redrawAll(previewEnd, currentSnapResult);
+      CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
+      redrawAll(previewEnd, snapResult);
       return;
     }
 
     // Check for vertex hover to toggle constraints
-    if (currentSnapResult.type === 'vertex' && currentSnapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
-      const vertex = currentSnapResult.metadata.vertex;
+    if (snapResult.type === 'vertex' && snapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+      const vertex = snapResult.metadata.vertex;
       const key = getVertexKey(vertex);
       if (!hoveredVerticesRef.current.has(key)) {
         hoveredVerticesRef.current.add(key);
@@ -877,39 +751,52 @@ const App: React.FC = () => {
 
     if (!currentStart) return;
 
-    // 1. ABSOLUTE HIGHEST PRIORITY: Hysteresis override
-    if (hysteresisActive && currentSnap?.type === 'vertex') {
-      preview = currentSnap.position;
-    } 
-    // 2. HIGH PRIORITY: Vertex or intersection snaps (when not in hysteresis)
-    else if (currentSnapResult.type === 'vertex' || currentSnapResult.type === 'intersection') {
-      if (currentSnapResult.type === 'intersection' && currentSnapResult.strength > 0.1) {
-        preview = currentSnapResult.position;
-      } else if (currentSnapResult.type === 'vertex') {
-        preview = currentSnapResult.position;
+    // Line preview logic
+    if (activeTool === 'LINE') {
+      // 1. ABSOLUTE HIGHEST PRIORITY: Hysteresis override
+      if (hysteresisActive && currentSnap?.type === 'vertex') {
+        preview = currentSnap.position;
+      } 
+      // 2. HIGH PRIORITY: Vertex or intersection snaps (when not in hysteresis)
+      else if (snapResult.type === 'vertex' || snapResult.type === 'intersection') {
+        if (snapResult.type === 'intersection' && snapResult.strength > 0.1) {
+          preview = snapResult.position;
+        } else if (snapResult.type === 'vertex') {
+          preview = snapResult.position;
+        }
+      } 
+      // 3. MEDIUM PRIORITY: Shift-held ortho snapping (user override)
+      else if (shiftHeld) {
+        // Hard snapping override with Shift key
+        const dx = cursorWorld.x - currentStart.x;
+        const dy = cursorWorld.y - currentStart.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
+        const rad = (nearest.angle * Math.PI) / 180;
+        preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
+      } 
+      // 4. LOW PRIORITY: Normal ortho snapping (if enabled and not temporarily disabled)
+      else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
+        const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+        if (constrained) {
+          preview = { x: constrained.x, y: constrained.y };
+        }
       }
-    } 
-    // 3. MEDIUM PRIORITY: Shift-held ortho snapping (user override)
-    else if (shiftHeld) {
-      // Hard snapping override with Shift key
-      const dx = cursorWorld.x - currentStart.x;
-      const dy = cursorWorld.y - currentStart.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
-      const rad = (nearest.angle * Math.PI) / 180;
-      preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
-    } 
-    // 4. LOW PRIORITY: Normal ortho snapping (if enabled and not temporarily disabled)
-    else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
-      const constrained = applyOrthoConstraint(currentStart, cursorWorld);
-      if (constrained) {
-        preview = { x: constrained.x, y: constrained.y };
-      } else {
+      // 5. FALLBACK: Use whatever snap result we have
+      else {
+        preview = snapResult.position;
       }
+
+      CommandAdapters.updatePreview(preview);
+      redrawAll(preview, snapResult);
+      return;
     }
-    // 5. FALLBACK: Use whatever snap result we have
-    else {
-      preview = currentSnapResult.position;
+
+    // Rectangle preview
+    if (activeTool === 'RECTANGLE' && currentStart) {
+      CommandAdapters.updatePreview(cursorWorld);
+      redrawAll(cursorWorld, snapResult);
+      return;
     }
 
     // Render ortho guidelines
@@ -917,37 +804,41 @@ const App: React.FC = () => {
       serviceRef.current.setOrthoConfig(orthoConfig);
     }
 
-    setPreviewEnd(preview);
-    redrawAll(preview, currentSnapResult);
+    CommandAdapters.updatePreview(preview);
+    redrawAll(preview, snapResult);
   };
+
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     if (evt.button === 1) {
       setPanStart(null);
     }
   };
+
   const handleContextMenu = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     evt.preventDefault();
     resetTool();
   };
+
   const handleClear = () => {
     console.log('CANVAS CLEARED');
-    setPrimitives([]);
-    setVertexConstraints([]);
+    CommandAdapters.clearCanvas();
     resetTool();
-    serviceRef.current?.clear();
   };
+
   const handleToolChange = (tool: ToolType) => {
-    setActiveTool(tool);
-    setSelectedPrimitiveIds([]);
+    CommandAdapters.setActiveTool(tool);
+    CommandAdapters.setSelection([]);
     resetTool();
   };
+
   const resetTool = () => {
-    setCurrentStart(null);
-    setPreviewEnd(null);
-    setActiveConstraint(null);
-    setVertexConstraints([]);
-    setSelectionStart(null);
-    setSelectionEnd(null);
+    CommandAdapters.updateCurrentStart(null);
+    CommandAdapters.updatePreview(null);
+    CommandAdapters.updateSelectionRect(null, null);
+    CommandAdapters.updateSelectionRect(null, null);
+    CommandAdapters.setActiveConstraint(null);
+    CommandAdapters.clearVertexConstraints();
+    
     setSnapResult(createNoSnapResult());
     setHysteresisActive(false);
     setCurrentSnap(null);
@@ -959,9 +850,11 @@ const App: React.FC = () => {
     }
     redrawAll(null, createNoSnapResult());
   };
+
   const handleThemeToggle = () => {
+    console.log('🎨 handleThemeToggle called');
     const newTheme = themeManager.getCurrentTheme() === 'dark' ? 'light' : 'dark';
-    themeManager.setTheme(newTheme);
+    themeManager.toggleTheme();
     setCurrentTheme(newTheme);
   
     const currentColors = themeManager.getCurrentColors();
@@ -1003,9 +896,7 @@ const App: React.FC = () => {
     redrawAll(previewEnd, snapResult);
   };
 
-
-
-  ////////// INTERFACE \\\\\\\\\\\
+  ////////// INTERFACE \\\\\\\\\\
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
       <canvas

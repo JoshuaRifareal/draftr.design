@@ -110,6 +110,36 @@ export class ThemeManager {
   }
 
 
+  // Black and White inversion \\
+  getRepresentationColor(realColor: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number; a: number } {
+    // If the REAL color is black (0,0,0), represent it appropriately for the theme
+    const isBlack = realColor.r === 0 && realColor.g === 0 && realColor.b === 0;
+    
+    if (isBlack) {
+      if (this.currentTheme === 'dark') {
+        return { r: 1.0, g: 1.0, b: 1.0, a: realColor.a }; // Represent as white in dark mode
+      } else {
+        return { r: 0.0, g: 0.0, b: 0.0, a: realColor.a }; // Keep as black in light mode
+      }
+    }
+    
+    // For non-black colors, return as-is (they should be visible in both themes)
+    return { ...realColor };
+  }
+  getRealColor(representationColor: { r: number; g: number; b: number; a: number }): { r: number; g: number; b: number; a: number } {
+    // If we're in dark mode and the representation is white, the real color is black
+    if (this.currentTheme === 'dark' && 
+        representationColor.r === 1.0 && 
+        representationColor.g === 1.0 && 
+        representationColor.b === 1.0) {
+      return { r: 0.0, g: 0.0, b: 0.0, a: representationColor.a };
+    }
+    
+    // Otherwise, assume it's the real color
+    return { ...representationColor };
+  }
+
+
   // Setters and Getters \\
   setTheme(theme: Theme): void {
     if (this.currentTheme === theme && this.lastAppliedTheme === theme) {
@@ -119,19 +149,19 @@ export class ThemeManager {
     this.currentTheme = theme;
     this.applyTheme(theme);
   }
-
   toggleTheme(): void {
     this.setTheme(this.currentTheme === 'dark' ? 'light' : 'dark');
   }
-
   getCurrentTheme(): Theme {
     return this.currentTheme;
   }
-
   getCurrentColors(): ThemeColors {
     return this.themes[this.currentTheme];
   }
 
+
+
+  // Apply theme \\
   private applyTheme(theme: Theme): void {
     const colors = this.themes[theme];
     

@@ -2,8 +2,7 @@ import React from 'react';
 import './UIOverlay.css';
 import { CommandBar } from './CommandBar/CommandBar';
 import { type Command } from './CommandBar/commands';
-import { commandDispatcher } from '../services/CommandDispatcher';
-import { CommandService } from '../services/CommandService'; 
+import { CommandAdapters } from '../services/CommandAdapters';
 import userIcon1 from '../assets/user-icon1.png';
 
 type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE';
@@ -26,53 +25,33 @@ interface UIOverlayProps {
 export const UIOverlay: React.FC<UIOverlayProps> = (props) => {
   const {
     scale,
-    // debug,
-    // setDebug,
-    // handleClear,
-    // orthoSnapEnabled,
-    // setOrthoSnapEnabled,
-    // shiftHeld,
-    // orthoTempDisabled,
     activeTool,
-    // onToolChange,
-    // onThemeToggle,
     selectedPrimitiveIds,
   } = props;
 
-
-  // Handle command
+  // SIMPLIFIED: Direct command handling
   const handleCommandSelect = (command: Command) => {
-    console.log('Command selected:', command.name);
+    console.log('Command selected via UIOverlay:', command.name);
     
-    let params = undefined;
+    // For delete command, pass selected IDs
     if (command.id === 'delete-selected') {
-      params = { selectedIds: selectedPrimitiveIds };
+      command.execute({ selectedIds: selectedPrimitiveIds });
+    } else {
+      command.execute();
     }
-    
-    commandDispatcher.executeCommand(command.id, params);
   };
 
   // Handle tool change
   const handleToolChange = (tool: ToolType) => {
-    const toolCommandMap: Record<ToolType, string> = {
-      'SELECTION': 'selection-tool',
-      'LINE': 'line-tool',
-      'RECTANGLE': 'rectangle-tool',
-      'CIRCLE': 'circle-tool'
-    };
-    const commandId = toolCommandMap[tool];
-    if (commandId) {
-      commandDispatcher.executeCommand(commandId);
-    }
+    CommandAdapters.setActiveTool(tool);
+    CommandAdapters.setSelection([]);
   };
 
-  // Interface
   return (
     <div className="draftrUI">
       
       {/* Navigation Bar */}
       <div className="nagivationBar">
-
         <div className="navBarLeft">
           <div className="mainMenu">draftr</div>
           <div className="projectTitle">Project title 🚀</div>
@@ -89,8 +68,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = (props) => {
           <div className="shareButton">Share</div>
           <span className="zoomLevelIndicator">{Math.round(scale * 100)}%</span>
         </div>
-        
-
       </div>
 
       {/* Layers Panel */}
@@ -102,7 +79,6 @@ export const UIOverlay: React.FC<UIOverlayProps> = (props) => {
       {/* Action Bar */}
       <div className="actionBar">
         <div className="toolBar">
-
           {/* select */}
           <button className={`toolButton select ${activeTool === 'SELECTION' ? 'active' : ''}`} onClick={() => handleToolChange('SELECTION')}>
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
@@ -130,13 +106,11 @@ export const UIOverlay: React.FC<UIOverlayProps> = (props) => {
           </button>
 
           <button className="modeBar"></button>
-          
         </div>
       </div>
-	  
+      
       {/* Command Bar - This will appear dynamically */}
       <CommandBar onCommandSelect={handleCommandSelect} />
-
     </div>
   );
 };

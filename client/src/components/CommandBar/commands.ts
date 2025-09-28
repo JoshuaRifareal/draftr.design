@@ -1,19 +1,20 @@
-// components/CommandBar/commands.ts - CORRECTED VERSION
-import type { CommandContext } from '../../services/CommandService';
+import { CommandAdapters } from '../../services/CommandAdapters';
+import { appStateStore } from '../../services/AppStateStore';
 import type { DrawingPrimitive } from '../../types/draftrTypes';
 
+// Command interface - SIMPLIFIED (no context parameter)
 export interface Command {
   id: string;
   name: string;
   description: string;
-  category: 'tools' | 'view' | 'edit' | 'file' | 'debug';
+  category: 'tools' | 'view' | 'edit' | 'file';
   aliases: string[];
   icon?: string;
-  execute: (context: CommandContext, params?: any) => Promise<any>; // ✅ Changed to async
-  undo?: (context: CommandContext, data: any) => void;
+  execute: (params?: any) => Promise<any>;
+  undo?: (data: any) => void;
 }
 
-// Levenshtein distance for fuzzy matching
+// Levenshtein distance for fuzzy matching (keep this as is)
 const levenshteinDistance = (a: string, b: string): number => {
   const matrix: number[][] = [];
 
@@ -142,23 +143,18 @@ const calculateMatchScore = (text: string, query: string): { score: number; matc
   return { score: 0, matchType: 'contains' };
 };
 
-// ✅ CORRECTED COMMAND REGISTRY - Uses getCurrentState() instead of currentState
+// SIMPLIFIED COMMAND REGISTRY - Using CommandAdapters directly
 export const commandRegistry: Command[] = [
-  // Tools
+  // Tools - SIMPLIFIED
   {
     id: 'selection-tool',
     name: 'Selection Tool',
     description: 'Select and manipulate objects',
     category: 'tools',
     aliases: ['select', 'selection', 'move', 'arrow', 'cursor', 'sel', 'pick', 'marquee'],
-    execute: async (context: CommandContext) => {
-      context.stateSetters.setActiveTool('SELECTION');
-      context.stateSetters.setCurrentStart(null);
-      context.stateSetters.setPreviewEnd(null);
-      return { previousTool: context.getCurrentState().activeTool };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setActiveTool(data.previousTool);
+    execute: async () => {
+      CommandAdapters.setActiveTool('SELECTION');
+      return { success: true };
     }
   },
   {
@@ -167,12 +163,9 @@ export const commandRegistry: Command[] = [
     description: 'Draw straight lines',
     category: 'tools',
     aliases: ['line', 'draw', 'pen', 'stroke', 'ln', 'lin', 'segment', 'vector'],
-    execute: async (context: CommandContext) => {
-      context.stateSetters.setActiveTool('LINE');
-      return { previousTool: context.getCurrentState().activeTool };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setActiveTool(data.previousTool);
+    execute: async () => {
+      CommandAdapters.setActiveTool('LINE');
+      return { success: true };
     }
   },
   {
@@ -181,12 +174,9 @@ export const commandRegistry: Command[] = [
     description: 'Draw rectangles and squares',
     category: 'tools',
     aliases: ['rectangle', 'rect', 'square', 'box', 'rec', 'sq', 'quad', 'polygon'],
-    execute: async (context: CommandContext) => {
-      context.stateSetters.setActiveTool('RECTANGLE');
-      return { previousTool: context.getCurrentState().activeTool };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setActiveTool(data.previousTool);
+    execute: async () => {
+      CommandAdapters.setActiveTool('RECTANGLE');
+      return { success: true };
     }
   },
   {
@@ -195,46 +185,37 @@ export const commandRegistry: Command[] = [
     description: 'Draw circles and ellipses',
     category: 'tools',
     aliases: ['circle', 'ellipse', 'round', 'oval', 'cir', 'circ', 'crcl', 'ellips'],
-    execute: async (context: CommandContext) => {
-      context.stateSetters.setActiveTool('CIRCLE');
-      return { previousTool: context.getCurrentState().activeTool };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setActiveTool(data.previousTool);
+    execute: async () => {
+      CommandAdapters.setActiveTool('CIRCLE');
+      return { success: true };
     }
   },
 
-  // View commands
+  // View commands - SIMPLIFIED
   {
     id: 'zoom-in',
     name: 'Zoom In',
     description: 'Zoom into the canvas',
     category: 'view',
     aliases: ['zoomin', 'zoom+', 'larger', 'bigger', 'zin', 'closeup', 'magnify'],
-    execute: async (context: CommandContext) => {
-      const currentState = context.getCurrentState(); // ✅ Fixed
+    execute: async () => {
+      const currentState = appStateStore.getState();
       const newScale = currentState.scale * 1.2;
-      context.stateSetters.setScale(newScale);
-      return { previousScale: currentState.scale };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setScale(data.previousScale);
+      CommandAdapters.zoom(newScale, currentState.offsetX, currentState.offsetY);
+      return { success: true };
     }
   },
   {
-    id: 'zoom-out',
+    id: 'zoom-out', 
     name: 'Zoom Out',
     description: 'Zoom out of the canvas',
     category: 'view',
     aliases: ['zoomout', 'zoom-', 'smaller', 'zout', 'overview', 'wide'],
-    execute: async (context: CommandContext) => {
-      const currentState = context.getCurrentState(); // ✅ Fixed
+    execute: async () => {
+      const currentState = appStateStore.getState();
       const newScale = currentState.scale / 1.2;
-      context.stateSetters.setScale(Math.max(0.05, newScale));
-      return { previousScale: currentState.scale };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setScale(data.previousScale);
+      CommandAdapters.zoom(Math.max(0.05, newScale), currentState.offsetX, currentState.offsetY);
+      return { success: true };
     }
   },
   {
@@ -243,70 +224,23 @@ export const commandRegistry: Command[] = [
     description: 'Reset zoom to 100%',
     category: 'view',
     aliases: ['resetzoom', 'actualsize', '100%', 'normal', 'defaultzoom', 'origin'],
-    execute: async (context: CommandContext) => {
-      const currentState = context.getCurrentState(); // ✅ Fixed
-      context.stateSetters.setScale(1.0);
-      return { previousScale: currentState.scale };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setScale(data.previousScale);
+    execute: async () => {
+      const currentState = appStateStore.getState();
+      CommandAdapters.zoom(1.0, currentState.offsetX, currentState.offsetY);
+      return { success: true };
     }
   },
 
-  // Edit commands
-  {
-    id: 'toggle-grid',
-    name: 'Toggle Grid',
-    description: 'Show/hide grid',
-    category: 'edit',
-    aliases: ['grid', 'showgrid', 'hidegrid', 'ruler', 'snapgrid', 'guides'],
-    execute: async (context: CommandContext) => {
-      console.log('Toggle grid functionality - to be implemented');
-      return {};
-    }
-  },
+  // Edit commands - SIMPLIFIED
   {
     id: 'clear-canvas',
     name: 'Clear Canvas',
     description: 'Clear all drawings',
     category: 'edit',
     aliases: ['clear', 'reset'],
-    execute: async (context: CommandContext) => {
-      const currentState = context.getCurrentState(); // ✅ Fixed
-      const previousPrimitives = currentState.primitives;
-      context.stateSetters.setPrimitives([]);
-      context.stateSetters.setSelectedPrimitiveIds([]);
-      return { previousPrimitives };
-    },
-    undo: (context: CommandContext, data: any) => {
-      context.stateSetters.setPrimitives(data.previousPrimitives);
-    }
-  },
-  {
-    id: 'draw-line',
-    name: 'Draw Line',
-    description: 'Draw a new line',
-    category: 'edit',
-    aliases: ['line', 'add-line'],
-    execute: async (context: CommandContext, params: { primitive: DrawingPrimitive }) => {
-      console.log('✏️ Draw-line command executing');
-      
-      const currentState = context.getCurrentState();
-      
-      const newPrimitives = [...currentState.primitives, params.primitive];
-      
-      context.stateSetters.setPrimitives(newPrimitives);
-      
-      return { 
-        primitiveId: params.primitive.id,
-        previousPrimitives: currentState.primitives 
-      };
-    },
-    undo: (context: CommandContext, data: any) => {
-      console.log('⏪ Draw-line undo executing');
-      const currentState = context.getCurrentState(); // ✅ Fixed
-      const newPrimitives = currentState.primitives.filter(p => p.id !== data.primitiveId);
-      context.stateSetters.setPrimitives(newPrimitives);
+    execute: async () => {
+      CommandAdapters.clearCanvas();
+      return { success: true };
     }
   },
   {
@@ -315,23 +249,10 @@ export const commandRegistry: Command[] = [
     description: 'Delete selected objects',
     category: 'edit',
     aliases: ['delete', 'del', 'remove'],
-    execute: async (context: CommandContext, params?: { selectedIds: string[] }) => {
+    execute: async (params?: { selectedIds: string[] }) => {
       const selectedIds = params?.selectedIds || [];
-      const currentState = context.getCurrentState(); // ✅ Fixed
-      const currentPrimitives = currentState.primitives;
-      
-      const newPrimitives = currentPrimitives.filter(p => !selectedIds.includes(p.id));
-      context.stateSetters.setPrimitives(newPrimitives);
-      context.stateSetters.setSelectedPrimitiveIds([]);
-      
-      return { 
-        deletedPrimitives: currentPrimitives.filter(p => selectedIds.includes(p.id))
-      };
-    },
-    undo: (context: CommandContext, data: any) => {
-      const currentState = context.getCurrentState(); // ✅ Fixed
-      const newPrimitives = [...currentState.primitives, ...data.deletedPrimitives];
-      context.stateSetters.setPrimitives(newPrimitives);
+      CommandAdapters.deleteSelected(selectedIds);
+      return { success: true };
     }
   },
 ];

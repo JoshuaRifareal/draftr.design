@@ -277,22 +277,29 @@ export class RenderService {
     const effectiveProperties = layerService.getEffectiveProperties(layer.id);
     
     primitives.forEach(primitive => {
-      // Apply layer color/opacity if primitive doesn't have its own
-      const color = primitive.originalColor || effectiveProperties.color || { r: 1, g: 1, b: 1, a: 1 };
+      const realColor = effectiveProperties.color || { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+      let finalColor = realColor;
+
+      // Use themeManager if available
+      if (typeof window !== 'undefined' && (window as any).themeManager) {
+        const themeManager = (window as any).themeManager;
+        finalColor = themeManager.getRepresentationColor(realColor);
+      } else {
+        // Fallback: simple inversion
+        const isDarkTheme = true; // Default to dark
+        if (isDarkTheme && realColor.r === 0 && realColor.g === 0 && realColor.b === 0) {
+          finalColor = { r: 1.0, g: 1.0, b: 1.0, a: realColor.a };
+        }
+      }
+
       const opacity = effectiveProperties.opacity ?? 1.0;
-      
-      const finalColor = {
-        r: color.r,
-        g: color.g, 
-        b: color.b,
-        a: color.a * opacity
-      };
+      finalColor.a *= opacity;
       
       switch (primitive.type) {
         case 'line':
           const [x1, y1, x2, y2] = primitive.data;
           this.drawLine(x1, y1, x2, y2, finalColor.r, finalColor.g, finalColor.b, finalColor.a);
-          break;
+        break;
         // Future: rectangle, circle, etc.
       }
     });

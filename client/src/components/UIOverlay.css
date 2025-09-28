@@ -225,6 +225,11 @@ html, body, #app {
         stroke-width: 1.5;
         fill: none;
       }
+
+      &:focus {
+        outline: none !important;
+        box-shadow: none !important;
+      }
     }
 
     /* active button and on hover */
