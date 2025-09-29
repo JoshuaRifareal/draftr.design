@@ -1,4 +1,4 @@
-# <img src="/client/src/assets/joshuarifareal_logo_light.png" width="50"> draftr.design
+# <img src="./client/src/assets/joshuarifareal_logo_light.png" width="20"> draftr.design
 
 
 **Precision CAD, reimagined for the web.**  
