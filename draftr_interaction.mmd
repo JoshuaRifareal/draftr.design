@@ -1,0 +1,99 @@
+flowchart TB
+    Start[User Action] --> InputType{Input Type}
+    
+    InputType --> Mouse[Mouse Event]
+    InputType --> Keyboard[Keyboard Event]
+    InputType --> UI[UI Interaction]
+    
+    %% Mouse Events
+    Mouse --> MouseButton{Mouse Button}
+    
+    MouseButton --> LeftClick[Left Click]
+    MouseButton --> MiddleClick[Middle Click]
+    MouseButton --> RightClick[Right Click]
+    MouseButton --> MouseMove[Mouse Move]
+    MouseButton --> Wheel[Mouse Wheel]
+    
+    LeftClick --> ToolCheck{Current Tool}
+    ToolCheck --> SelectionTool[Selection Tool]
+    ToolCheck --> DrawingTool[Drawing Tool LINE/RECT/CIRCLE]
+    ToolCheck --> OtherTool[Other Tool]
+    
+    SelectionTool --> SelectionAction{Shift Key?}
+    SelectionAction --> AddSelection[Add to Selection]
+    SelectionAction --> SubtractSelection[Subtract from Selection]
+    
+    DrawingTool --> LayerCheck{Layer Locked?}
+    LayerCheck --> Locked[Layer Locked] --> ShowDisabled[Show Disabled Cursor]
+    LayerCheck --> Unlocked[Layer Unlocked] --> DrawOperation[Start/Continue Drawing]
+    
+    DrawOperation --> SnapCheck[Calculate Snap Position]
+    SnapCheck --> ApplyHysteresis{Hysteresis Active?}
+    ApplyHysteresis --> Yes[Yes] --> UseStickySnap[Use Sticky Snap Point]
+    ApplyHysteresis --> No[No] --> FindBestSnap[Find Best Snap]
+    
+    FindBestSnap --> PriorityCheck[Run Priority System]
+    PriorityCheck --> VertexFirst[Vertex > Intersection > Constraint > Ortho]
+    VertexFirst --> ApplySnap[Apply Snap Position]
+    
+    MiddleClick --> StartPanning[Start Panning]
+    RightClick --> CancelOperation[Cancel Current Operation]
+    MouseMove --> UpdatePreview[Update Preview/Selection Rect]
+    Wheel --> Zoom[Zoom at Cursor Position]
+    
+    %% Keyboard Events
+    Keyboard --> KeyType{Key Pressed}
+    
+    KeyType --> ModifierKey[Modifier Key Shift/Ctrl]
+    KeyType --> FunctionKey[Function Key F8/F9/F10]
+    KeyType --> EscapeKey[Escape Key]
+    KeyType --> CommandKey[Command Key Ctrl+K]
+    
+    ModifierKey --> UpdateModifierState[Update Modifier State]
+    FunctionKey --> ToggleFeature[Toggle Snapping/Theme]
+    EscapeKey --> ResetTool[Reset Tool State]
+    CommandKey --> OpenCommandBar[Open Command Palette]
+    
+    %% UI Interactions
+    UI --> UIType{UI Element}
+    
+    UIType --> ToolButton[Tool Button]
+    UIType --> LayerItem[Layer Item]
+    UIType --> CommandItem[Command Item]
+    
+    ToolButton --> SwitchTool[Switch Active Tool]
+    LayerItem --> ActivateLayer[Activate/Deactivate Layer]
+    CommandItem --> ExecuteCommand[Execute Command]
+    
+    %% Output Operations
+    ApplySnap --> RenderPreview[Render Preview with Snap]
+    DrawOperation --> CreatePrimitive[Create New Primitive]
+    AddSelection --> UpdateSelection[Update Selection Set]
+    StartPanning --> UpdateViewport[Update Viewport Offset]
+    Zoom --> UpdateZoom[Update Zoom Scale]
+    
+    CreatePrimitive --> AssignToLayer[Assign to Active Layer]
+    UpdateSelection --> HighlightSelection[Highlight Selected Primitives]
+    
+    AssignToLayer --> UpdateLayerCount[Update Layer Primitive Count]
+    UpdateLayerCount --> SyncUI[Sync UI State]
+    
+    RenderPreview --> RedrawCanvas[Redraw Canvas]
+    UpdateViewport --> RedrawCanvas
+    UpdateZoom --> RedrawCanvas
+    HighlightSelection --> RedrawCanvas
+    
+    SyncUI --> UpdateLayerPanel[Update Layer Panel Display]
+    
+    RedrawCanvas --> VisualFeedback[Visual Feedback to User]
+    UpdateLayerPanel --> VisualFeedback
+    
+    classDef input fill:#e3f2fd
+    classDef decision fill:#fff3e0
+    classDef operation fill:#e8f5e8
+    classDef output fill:#f3e5f5
+    
+    class Start,Mouse,Keyboard,UI input
+    class InputType,MouseButton,ToolCheck,SelectionAction,LayerCheck,ApplyHysteresis,KeyType,UIType decision
+    class DrawOperation,SnapCheck,PriorityCheck,ApplySnap,CreatePrimitive,UpdateSelection,StartPanning,Zoom operation
+    class VisualFeedback,RedrawCanvas,UpdateLayerPanel,HighlightSelection output
