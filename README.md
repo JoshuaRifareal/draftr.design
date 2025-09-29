@@ -1,5 +1,5 @@
-#  draftr.design
-<img src="/client/src/assets/joshuarifareal_logo_light.png" width="100">
+# <img src="/client/src/assets/joshuarifareal_logo_light.png" width="50"> draftr.design
+
 
 **Precision CAD, reimagined for the web.**  
 A performant, modern CAD application built with Rust & WebAssembly for buttery-smooth drafting in your browser.
