@@ -6,7 +6,7 @@
 // 5. Intersection detection
 // 6. Temporary state management
 
-import type { DrawingPrimitive } from '../types/draftrTypes';
+import type { DrawingPrimitive } from '../types/DraftrTypes';
 
 // ===== INTERFACES AND TYPES =====
 export type SnapType = 

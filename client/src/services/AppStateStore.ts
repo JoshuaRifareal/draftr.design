@@ -1,5 +1,5 @@
 // services/AppStateStore.ts
-import type { DrawingPrimitive } from '../types/draftrTypes';
+import type { DrawingPrimitive } from '../types/DraftrTypes';
 
 declare global {
     interface Window {

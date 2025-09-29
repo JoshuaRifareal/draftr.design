@@ -1,6 +1,6 @@
 // services/CommandAdapters.ts
 import { appStateStore, type AppState } from './AppStateStore';
-import type { DrawingPrimitive } from '../types/draftrTypes';
+import type { DrawingPrimitive } from '../types/DraftrTypes';
 import { layerService } from './LayerService';
 
 // Add window type declaration at the top

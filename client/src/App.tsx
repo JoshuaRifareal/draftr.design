@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import init from "./pkg/draftr_engine.js";
+import init from "./pkg/draftr_engine";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
 import { snappingService, contextManager, type SnapType } from './services/SnappingService';
@@ -8,7 +8,7 @@ import { selectionService } from './services/SelectionService';
 import { layerService } from './services/LayerService';
 import { appStateStore, type AppState } from './services/AppStateStore';
 import { CommandAdapters } from './services/CommandAdapters';
-import type { DrawingPrimitive } from './types/draftrTypes';
+import type { DrawingPrimitive } from './types/DraftrTypes';
 import { useCursor } from './components/Cursors/useCursor';
 import { CURSORS  } from './components/Cursors/cursors';
 
