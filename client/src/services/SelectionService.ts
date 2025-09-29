@@ -1,5 +1,5 @@
 // services/SelectionService.ts
-import { layerService, type Layer } from './LayerService';
+import { layerService } from './LayerService';
 
 export interface Primitive {
   id: string;

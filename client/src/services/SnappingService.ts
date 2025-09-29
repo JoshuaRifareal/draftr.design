@@ -72,7 +72,7 @@ export class SnappingContextManager {
 
   constructor(initialContext: Partial<SnappingContext> = {}) {
     this.currentContext = {
-      lines: [],
+      primitives: [],
       vertexConstraints: [],
       activeConstraint: null,
       currentStart: null,

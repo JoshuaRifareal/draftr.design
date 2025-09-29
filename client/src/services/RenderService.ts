@@ -3,7 +3,7 @@
 // 2. Orthogonal and constraint guides snapping
 // 3. Pan/zoom functionality
 
-import { Renderer } from "../pkg/draftr_engine.js";
+import { Renderer } from "../pkg/draftr_engine";
 import { layerService, type Layer } from './LayerService';
 import { selectionService, type Primitive } from './SelectionService';
 
@@ -123,7 +123,7 @@ export class RenderService {
           // Future: rectangle rendering
           const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
           this.drawRectangle(rectX1, rectY1, rectX2, rectY2,
-            finalColor.r, finalColor.g, finalColor.b, finalColor.a, false);
+            rectR, rectG, rectB, rectA, false);
         break;
         // Future: other primitive types
       }
@@ -135,7 +135,7 @@ export class RenderService {
     const {
         offsetX, offsetY, scale,
         activeTool, activeConstraint, constraintColor,
-        currentStart, orthoConfig, vertexConstraints,
+        currentStart, vertexConstraints,
         selectedPrimitiveIds, selectionStart, selectionEnd,
         lineColor, snapColor, orthoThresholdDeg, orthoAnglesDeg
     } = params;

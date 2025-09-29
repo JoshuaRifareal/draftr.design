@@ -227,19 +227,6 @@ export class AppStateStore {
     this.listeners.forEach(listener => listener(this.currentState));
   }
 
-  // 🎯 DEEP CLONE UTILITY
-  private deepCloneState(state: AppState): AppState {
-    return {
-      ...state,
-      primitives: state.primitives.map(primitive => ({ ...primitive })),
-      selectedPrimitiveIds: [...state.selectedPrimitiveIds],
-      selectionStart: state.selectionStart ? { ...state.selectionStart } : null,
-      selectionEnd: state.selectionEnd ? { ...state.selectionEnd } : null,
-      currentStart: state.currentStart ? { ...state.currentStart } : null,
-      previewEnd: state.previewEnd ? { ...state.previewEnd } : null
-    };
-  }
-
   // 🎯 DEBUG UTILITIES
   getDebugInfo() {
     return {

@@ -7,7 +7,7 @@ interface LayerPanelProps {
   selectedPrimitiveIds: string[];
 }
 
-export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) => {
+export const LayerPanel: React.FC<LayerPanelProps> = ({ }) => {
   const [layers, setLayers] = useState<Layer[]>([]);
   const [activeLayerId, setActiveLayerId] = useState<string | null>(null);
   const [isAddingLayer, setIsAddingLayer] = useState(false);

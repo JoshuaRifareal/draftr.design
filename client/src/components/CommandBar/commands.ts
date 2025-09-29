@@ -1,6 +1,5 @@
 import { CommandAdapters } from '../../services/CommandAdapters';
 import { appStateStore } from '../../services/AppStateStore';
-import type { DrawingPrimitive } from '../../types/draftrTypes';
 
 // Command interface - SIMPLIFIED (no context parameter)
 export interface Command {

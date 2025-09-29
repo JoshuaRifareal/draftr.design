@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import init from "./pkg/draftr_engine";
+import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
 import { snappingService, contextManager, type SnapType } from './services/SnappingService';
@@ -628,14 +628,12 @@ const App: React.FC = () => {
   ////////// INTERACTION \\\\\\\\\\
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
-    const worldPos = screenToWorld(pos.x, pos.y);
 
     if (evt.button === 0) {
       const activeLayer = layerService.getActiveLayer();
       const snapResult = findSnap(pos);
       const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
       let intersectionSnap = null;
-      const cursorWorld = constraintSnap ?? (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
       let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
 
       // Set drawing state for non-selection tools
@@ -770,7 +768,6 @@ const App: React.FC = () => {
     const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
     const cursorWorld = constraintSnap ?? 
                        (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
-    const intersectionSnap = snapResult.type === 'intersection' ? snapResult.position : null;
     let preview = cursorWorld;
 
     // Panning functionality
