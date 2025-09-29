@@ -66,3 +66,18 @@
   - Visual feedback for snapping and constraints
 
 ---
+
+## Checkpoint #6 – Layer System
+- ✅ **Architecture and Management**:
+  - Hierarchical layer structure with parent-child relationships
+  - Orphaned primitives support for unassigned geometry
+  - Layer properties inheritance (visibility, locking, color)
+  - Active layer system for primitive assignment and reassignment
+
+- ✅ **Visual Organization**:
+  - Layer panel React component
+  - Primitive assignment tracking per layer
+  - Active layer indication
+  - Real-time synchronization between canvas and layer panel
+  - Theme-aware rendering for layer-specific colors
+  - Selection highlighting that respects layer visibility
