@@ -1,0 +1,37 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_renderer_free: (a: number, b: number) => void;
+export const __wbg_get_renderer_offset_x: (a: number) => number;
+export const __wbg_set_renderer_offset_x: (a: number, b: number) => void;
+export const __wbg_get_renderer_offset_y: (a: number) => number;
+export const __wbg_set_renderer_offset_y: (a: number, b: number) => void;
+export const __wbg_get_renderer_scale: (a: number) => number;
+export const __wbg_set_renderer_scale: (a: number, b: number) => void;
+export const renderer_new: (a: any) => number;
+export const renderer_setOrthoColor: (a: number, b: number, c: number, d: number, e: number) => void;
+export const renderer_setOrthoDash: (a: number, b: number, c: number) => void;
+export const renderer_setOrthoThickness: (a: number, b: number) => void;
+export const renderer_setOrthoThresholdDeg: (a: number, b: number) => void;
+export const renderer_setGridColor: (a: number, b: number, c: number, d: number, e: number) => void;
+export const renderer_setGridSpacing: (a: number, b: number, c: number) => void;
+export const renderer_setCanvasColor: (a: number, b: number, c: number, d: number, e: number) => void;
+export const renderer_setSelectionColor: (a: number, b: number, c: number, d: number, e: number) => void;
+export const renderer_setOrthoAngles: (a: number, b: any) => void;
+export const renderer_resize: (a: number, b: number, c: number) => void;
+export const renderer_draw_line: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => void;
+export const renderer_draw_circle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+export const renderer_draw_rectangle: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => void;
+export const renderer_draw_selection_rectangle: (a: number, b: number, c: number, d: number, e: number) => void;
+export const renderer_draw_cross: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+export const renderer_draw_constraint_guide: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => void;
+export const renderer_draw_lines: (a: number, b: number, c: number) => any;
+export const renderer_clear: (a: number) => void;
+export const renderer_draw_grid: (a: number, b: number, c: number, d: number) => void;
+export const renderer_drawOrthoGuide: (a: number, b: number, c: number, d: number) => void;
+export const __externref_table_alloc: () => number;
+export const __wbindgen_export_1: WebAssembly.Table;
+export const __wbindgen_exn_store: (a: number) => void;
+export const __wbindgen_malloc: (a: number, b: number) => number;
+export const __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_start: () => void;

@@ -1,0 +1,15 @@
+{
+  "name": "draftr",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "draftr_engine_bg.wasm",
+    "draftr_engine.js",
+    "draftr_engine.d.ts"
+  ],
+  "main": "draftr_engine.js",
+  "types": "draftr_engine.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
