@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "npm run build:wasm && vite",
+    "build": "npm run build:wasm && vite build",
+    "build:wasm": "cd ../engine && wasm-pack build --target web --out-dir ../client/src/pkg",
     "lint": "eslint .",
-    "preview": "vite preview",
-    "build-wasm": "cd ..\\engine && wasm-pack build --target web --out-dir ../client/public/pkg"
+    "preview": "vite preview"
   },
   "dependencies": {
     "react": "^19.1.1",
