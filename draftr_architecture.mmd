@@ -1,0 +1,61 @@
+flowchart TB
+    User[User Input] --> App[App.tsx]
+    
+    App --> Tools
+    App --> Cursors[Custom Cursors]
+    App --> ThemeManager
+    
+    subgraph Tools[Tools]
+        Selection[Selection Tool]
+        Line[Line Tool]
+        Rectangle[Rectangle Tool]
+        Circle[Circle Tool]
+    end
+    
+    Tools --> MouseHandlers[Mouse Handlers]
+    MouseHandlers --> SnappingService
+    MouseHandlers --> CommandAdapters
+    
+    SnappingService --> ContextManager
+    ContextManager --> VertexSnap[Vertex Snap]
+    ContextManager --> OrthoSnap[Ortho Snap]
+    ContextManager --> ConstraintSnap[Constraint Snap]
+    ContextManager --> Hysteresis[Hysteresis System]
+    ContextManager --> Priority[Priority System]
+    
+    CommandAdapters --> AppStateStore
+    AppStateStore --> LayerService
+    AppStateStore --> SelectionService
+    AppStateStore --> RenderService
+    
+    LayerService --> LayerPanel[Layer Panel]
+    SelectionService --> Selection
+    RenderService --> WASM[Rust/WASM Engine]
+    
+    WASM --> Geometry[Geometry Calculations]
+    WASM --> WebGL[WebGL2 Rendering]
+    WebGL --> Canvas[Canvas Output]
+    
+    UIOverlay --> CommandBar[Command Bar]
+    UIOverlay --> LayerPanel
+    CommandBar --> CommandAdapters
+    
+    ThemeManager --> UIOverlay
+    ThemeManager --> RenderService
+    ThemeManager --> Cursors
+    
+    AppStateStore -.-> UIOverlay
+    AppStateStore -.-> LayerPanel
+    AppStateStore -.-> RenderService
+    
+    classDef tool fill:#e8f5e8
+    classDef service fill:#e1f5fe
+    classDef snap fill:#fce4ec
+    classDef render fill:#fff3e0
+    classDef ui fill:#f3e5f5
+    
+    class Tools tool
+    class SnappingService,ContextManager,AppStateStore,LayerService,SelectionService,RenderService,CommandAdapters,ThemeManager service
+    class VertexSnap,OrthoSnap,ConstraintSnap,Hysteresis,Priority snap
+    class WASM,Geometry,WebGL,Canvas render
+    class UIOverlay,CommandBar,LayerPanel,Cursors ui
