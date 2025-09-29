@@ -45,10 +45,18 @@ export const useCommandBar = (): UseCommandBarReturn => {
   // Global keyboard listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+
+      const activeElement = document.activeElement;
+      const isTypingInInput = activeElement?.tagName === 'INPUT' || 
+                              activeElement?.tagName === 'TEXTAREA';
+
       // Ctrl+K activation
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault();
-        openCommandBar(currentMousePos.x, currentMousePos.y);
+
+        if (!isTypingInInput && !isOpen) {
+          openCommandBar(currentMousePos.x, currentMousePos.y);
+        }
         return;
       }
 

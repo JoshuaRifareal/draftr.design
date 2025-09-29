@@ -26,7 +26,7 @@ export class SelectionService {
       return;
     }
     
-    const assignedLayerId = layerId ?? layerService.getActiveLayerId();
+    const assignedLayerId = layerId !== undefined ? layerId : layerService.getActiveLayerId();
     
     this.primitives.set(id, { 
       id, 
@@ -71,12 +71,12 @@ export class SelectionService {
     return Array.from(this.primitives.values()).filter(primitive => {
         if (!primitive.data || primitive.data.length === 0) return false;
         
+        if (!primitive.layerId) return true;
+
         // Check layer visibility
-        if (primitive.layerId) {
-            const layer = layerService.getLayer(primitive.layerId);
-            if (layer && !layer.properties.visible) {
-                return false; // Skip primitives on hidden layers
-            }
+        const layer = layerService.getLayer(primitive.layerId);
+        if (layer && !layer.properties.visible) {
+          return false; // Skip primitives on hidden layers
         }
         
         return true;

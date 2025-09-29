@@ -74,20 +74,59 @@ export class RenderService {
   }
   drawAllPrimitives(): void {
     const allPrimitives = selectionService.getAllPrimitives();
-    
+  
     // Group primitives by layer for efficient rendering
     const primitivesByLayer = this.groupPrimitivesByLayer(allPrimitives);
     
-    // Render layers in hierarchy order (parents first, then children)
+    // Render layers in hierarchy order
     const layersInRenderOrder = this.getLayersInRenderOrder();
     
+    // Render orphaned primitives first (or last, depending on desired z-order)
+    const orphanedPrimitives = primitivesByLayer.get('__orphaned__') || [];
+    if (orphanedPrimitives.length > 0) {
+      this.drawOrphanedPrimitives(orphanedPrimitives);
+    }
+    
+    // Then render layered primitives
     layersInRenderOrder.forEach(layer => {
-      if (!layer.properties.visible) {
-        return; // Skip hidden layers
-      }
+      if (!layer.properties.visible) return;
       
       const layerPrimitives = primitivesByLayer.get(layer.id) || [];
       this.drawPrimitivesWithLayerProperties(layerPrimitives, layer);
+    });
+  }
+  private drawOrphanedPrimitives(primitives: Primitive[]): void {
+    primitives.forEach(primitive => {
+      // Use default color for orphaned primitives
+      const realColor = { r: 0.0, g: 0.0, b: 0.0, a: 1.0 };
+      
+      // Apply theme transformation if needed
+      let finalColor = realColor;
+      if (typeof window !== 'undefined' && (window as any).themeManager) {
+        const themeManager = (window as any).themeManager;
+        finalColor = themeManager.getRepresentationColor(realColor);
+      } else {
+        // Fallback: simple inversion (same as layered primitives fallback)
+        const isDarkTheme = true; // Default to dark
+        if (isDarkTheme && realColor.r === 0 && realColor.g === 0 && realColor.b === 0) {
+          finalColor = { r: 1.0, g: 1.0, b: 1.0, a: realColor.a };
+        }
+      }
+      
+      switch (primitive.type) {
+        case 'line':
+          const [x1, y1, x2, y2] = primitive.data;
+          this.drawLine(x1, y1, x2, y2, 
+            finalColor.r, finalColor.g, finalColor.b, finalColor.a);
+        break;
+        case 'rectangle':
+          // Future: rectangle rendering
+          const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
+          this.drawRectangle(rectX1, rectY1, rectX2, rectY2,
+            finalColor.r, finalColor.g, finalColor.b, finalColor.a, false);
+        break;
+        // Future: other primitive types
+      }
     });
   }
   redrawAll(preview: { x: number; y: number } | null, snapResult: any, params: RedrawParams): void {
@@ -251,24 +290,21 @@ export class RenderService {
   }
   private groupPrimitivesByLayer(primitives: Primitive[]): Map<string, Primitive[]> {
     const grouped = new Map<string, Primitive[]>();
-    
-    // Include orphaned primitives under a virtual "Orphaned" group
-    const orphaned: Primitive[] = [];
-    
+  
     primitives.forEach(primitive => {
       if (primitive.layerId) {
         const layerPrimitives = grouped.get(primitive.layerId) || [];
         layerPrimitives.push(primitive);
         grouped.set(primitive.layerId, layerPrimitives);
       } else {
-        orphaned.push(primitive);
+        // Ensure orphaned primitives are rendered
+        // Use a special key for orphaned primitives
+        const orphanedKey = '__orphaned__';
+        const orphanedPrimitives = grouped.get(orphanedKey) || [];
+        orphanedPrimitives.push(primitive);
+        grouped.set(orphanedKey, orphanedPrimitives);
       }
     });
-    
-    // Orphaned primitives are rendered after all layers
-    if (orphaned.length > 0) {
-      grouped.set('__orphaned__', orphaned);
-    }
     
     return grouped;
   }

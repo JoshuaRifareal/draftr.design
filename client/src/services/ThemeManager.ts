@@ -50,8 +50,8 @@ export class ThemeManager {
   // DARK THEME \\
   private getDarkTheme(): ThemeColors {
     return {
-      constraintColor: { r: 128, g: 0, b: 128, a: 1.0 },
-      orthoColor: { r: 0, g: 255, b: 0, a: 1.0 },
+      constraintColor: { r: 1, g: 0, b: 1, a: 1.0 },
+      orthoColor: { r: 0, g: 1, b: 0, a: 1.0 },
       gridColor: { r: 0, g: 0, b: 0, a: 0.1 },
       canvasColor: { r: 0.17, g: 0.17, b: 0.19, a: 1.0 },
       selectionColor: { r: 0.0, g: 0.0, b: 1.0, a: 0.25 },
@@ -84,8 +84,8 @@ export class ThemeManager {
   // LIGHT THEME \\
   private getLightTheme(): ThemeColors {
     return {
-      constraintColor: { r: 128, g: 0, b: 128, a: 1.0 },
-      orthoColor: { r: 0, g: 150, b: 0, a: 1.0 },
+      constraintColor: { r: 1, g: 0, b: 1, a: 0.8 },
+      orthoColor: { r: 0, g: 1, b: 0, a: 1.0 },
       gridColor: { r: 0, g: 0, b: 0, a: 0.4 },
       canvasColor: { r: 0.95, g: 0.95, b: 0.96, a: 1.0 },
       selectionColor: { r: 0.0, g: 0.0, b: 1.0, a: 0.50 },

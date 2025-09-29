@@ -1,9 +1,11 @@
 import React from 'react';
 import './UIOverlay.css';
-import { CommandBar } from './CommandBar/CommandBar';
 import { type Command } from './CommandBar/commands';
+import { CommandBar } from './CommandBar/CommandBar';
 import { CommandAdapters } from '../services/CommandAdapters';
+import { LayerPanel } from './LayerPanel/LayerPanel';
 import userIcon1 from '../assets/user-icon1.png';
+import draftrLogo from '../assets/joshuarifareal_logo.ico';
 
 type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE';
 
@@ -53,7 +55,12 @@ export const UIOverlay: React.FC<UIOverlayProps> = (props) => {
       {/* Navigation Bar */}
       <div className="nagivationBar">
         <div className="navBarLeft">
-          <div className="mainMenu">draftr</div>
+
+          <div className="mainMenu">
+            <img src={draftrLogo} alt="" />
+            <span>draftr</span>
+          </div>
+
           <div className="projectTitle">Project title 🚀</div>
         </div>
 
@@ -71,10 +78,7 @@ export const UIOverlay: React.FC<UIOverlayProps> = (props) => {
       </div>
 
       {/* Layers Panel */}
-      <div className="layersPanel">
-        <div className="panelHeader">Layers</div>
-        <div className="panelBody"></div>
-      </div>
+      <LayerPanel selectedPrimitiveIds={selectedPrimitiveIds} />
 
       {/* Action Bar */}
       <div className="actionBar">

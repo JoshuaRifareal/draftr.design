@@ -73,7 +73,6 @@
 .command-label {
   color: var(--text-primary);
   font-size: 12px;
-  font-weight: 500;
 }
 
 .command-category {

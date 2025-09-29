@@ -151,7 +151,7 @@ export const commandRegistry: Command[] = [
     name: 'Selection Tool',
     description: 'Select and manipulate objects',
     category: 'tools',
-    aliases: ['select', 'selection', 'move', 'arrow', 'cursor', 'sel', 'pick', 'marquee'],
+    aliases: ['select', 'selection', 'arrow', 'cursor', 'sel', 'pick', 'marquee'],
     execute: async () => {
       CommandAdapters.setActiveTool('SELECTION');
       return { success: true };
@@ -162,7 +162,7 @@ export const commandRegistry: Command[] = [
     name: 'Line Tool',
     description: 'Draw straight lines',
     category: 'tools',
-    aliases: ['line', 'draw', 'pen', 'stroke', 'ln', 'lin', 'segment', 'vector'],
+    aliases: ['line', 'add', 'draw', 'pen', 'stroke', 'ln', 'lin', 'segment', 'vector'],
     execute: async () => {
       CommandAdapters.setActiveTool('LINE');
       return { success: true };
@@ -173,7 +173,7 @@ export const commandRegistry: Command[] = [
     name: 'Rectangle Tool',
     description: 'Draw rectangles and squares',
     category: 'tools',
-    aliases: ['rectangle', 'rect', 'square', 'box', 'rec', 'sq', 'quad', 'polygon'],
+    aliases: ['rectangle', 'rect', 'box', 'rec', 'quad', 'polygon'],
     execute: async () => {
       CommandAdapters.setActiveTool('RECTANGLE');
       return { success: true };
@@ -248,7 +248,7 @@ export const commandRegistry: Command[] = [
     name: 'Delete Selected',
     description: 'Delete selected objects',
     category: 'edit',
-    aliases: ['delete', 'del', 'remove'],
+    aliases: ['delete', 'x', 'del', 'remove'],
     execute: async (params?: { selectedIds: string[] }) => {
       const selectedIds = params?.selectedIds || [];
       CommandAdapters.deleteSelected(selectedIds);

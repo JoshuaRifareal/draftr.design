@@ -19,7 +19,17 @@ export interface Layer {
 export class LayerService {
     private layers: Map<string, Layer> = new Map();
     private activeLayerId: string | null = null;
-    
+
+    // Event system for layer changes
+    private listeners: Set<() => void> = new Set();
+    subscribe(listener: () => void): () => void {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+    private notifyListeners(): void {
+        this.listeners.forEach(listener => listener());
+    }
+
     // Pre-defined layer names (but not created automatically)
     private readonly PREDEFINED_LAYER_NAMES = {
         DEFAULT: 'Default',
@@ -55,7 +65,7 @@ export class LayerService {
         console.log('📁 Default layer created at initialization');
     }
 
-    // Method to create tool-specific layers on demand
+    // Layers API
     createToolLayer(layerType: 'text' | 'dimensions' | 'images'): Layer {
         const layerMap = {
             text: { id: this.PREDEFINED_LAYER_NAMES.TEXT, name: 'Text', color: { r: 0.0, g: 0.8, b: 0.2, a: 1.0 } },
@@ -91,8 +101,6 @@ export class LayerService {
         console.log('🛠️ Tool layer created:', { id: layer.id, name: layer.name });
         return layer;
     }
-
-    // Check if a tool layer exists
     getToolLayer(layerType: 'text' | 'dimensions' | 'images'): Layer | undefined {
         const layerMap = {
             text: this.PREDEFINED_LAYER_NAMES.TEXT,
@@ -102,13 +110,10 @@ export class LayerService {
 
         return this.layers.get(layerMap[layerType]);
     }
-
-    // Get or create tool layer (convenience method for future tool integration)
     ensureToolLayer(layerType: 'text' | 'dimensions' | 'images'): Layer {
+        // Get or create tool layer (convenience method for future tool integration)
         return this.getToolLayer(layerType) || this.createToolLayer(layerType);
     }
-
-    // Rest of the methods remain the same...
     createLayer(name: string, parentId: string | null = null): Layer {
         const id = this.generateLayerId();
         const parent = parentId ? this.layers.get(parentId) : null;
@@ -133,9 +138,9 @@ export class LayerService {
 
         this.layers.set(id, layer);
         console.log('✅ Layer created:', { id, name, parentId });
+        this.notifyListeners();
         return layer;
     }
-
     deleteLayer(layerId: string): boolean {
         if (this.PREDEFINED_LAYER_NAMES.DEFAULT === layerId) {
             console.warn('🚫 Cannot delete Default layer');
@@ -163,10 +168,9 @@ export class LayerService {
         }
 
         console.log('🗑️ Layer deleted:', layerId);
+        this.notifyListeners();
         return true;
     }
-
-    // ... (rest of the methods remain unchanged)
     assignPrimitiveToLayer(primitiveId: string, layerId: string | null): boolean {
         for (const layer of this.layers.values()) {
             if (layer.primitiveIds.has(primitiveId)) {
@@ -186,15 +190,13 @@ export class LayerService {
         } else {
             // console.log('👻 Primitive orphaned:', primitiveId);
         }
-
+        this.notifyListeners();
         return true;
     }
-
     getPrimitivesByLayer(layerId: string): string[] {
         const layer = this.layers.get(layerId);
         return layer ? Array.from(layer.primitiveIds) : [];
     }
-
     getLayerByPrimitive(primitiveId: string): Layer | null {
         for (const layer of this.layers.values()) {
             if (layer.primitiveIds.has(primitiveId)) {
@@ -203,7 +205,6 @@ export class LayerService {
         }
         return null;
     }
-
     setActiveLayer(layerId: string | null): boolean {
         if (layerId && !this.layers.has(layerId)) {
             console.warn('❌ Layer not found:', layerId);
@@ -212,17 +213,15 @@ export class LayerService {
 
         this.activeLayerId = layerId;
         console.log('🎯 Active layer set to:', layerId || 'None (orphaning)');
+        this.notifyListeners();
         return true;
     }
-
     getActiveLayer(): Layer | null {
         return this.activeLayerId ? this.layers.get(this.activeLayerId) || null : null;
     }
-
     getActiveLayerId(): string | null {
         return this.activeLayerId;
     }
-
     getEffectiveProperties(layerId: string): LayerProperties {
         const layer = this.layers.get(layerId);
         if (!layer) return this.getDefaultProperties();
@@ -237,32 +236,29 @@ export class LayerService {
             ...layer.properties
         };
     }
-
     updateLayerProperties(layerId: string, updates: Partial<LayerProperties>): boolean {
         const layer = this.layers.get(layerId);
         if (!layer) return false;
 
         layer.properties = { ...layer.properties, ...updates };
         console.log('⚙️ Layer properties updated:', { layerId, updates });
+        this.notifyListeners();
         return true;
     }
-
     getLayerHierarchy(): Layer[] {
         return Array.from(this.layers.values()).filter(layer => !layer.parentId);
     }
-
     getLayer(id: string): Layer | undefined {
         return this.layers.get(id);
     }
-
     getAllLayers(): Layer[] {
         return Array.from(this.layers.values());
     }
 
+    // Helpers
     private generateLayerId(): string {
         return `layer-${crypto.randomUUID()}`;
     }
-
     private getDefaultProperties(): LayerProperties {
         return {
             locked: false,
@@ -270,7 +266,6 @@ export class LayerService {
             opacity: 1.0
         };
     }
-
     private transferPrimitives(fromLayerId: string, toLayerId: string): void {
         const fromLayer = this.layers.get(fromLayerId);
         const toLayer = this.layers.get(toLayerId);

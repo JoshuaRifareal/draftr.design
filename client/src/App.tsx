@@ -9,6 +9,9 @@ import { layerService } from './services/LayerService';
 import { appStateStore, type AppState } from './services/AppStateStore';
 import { CommandAdapters } from './services/CommandAdapters';
 import type { DrawingPrimitive } from './types/draftrTypes';
+import { useCursor } from './components/Cursors/useCursor';
+import { CURSORS  } from './components/Cursors/cursors';
+
 
 // INTERFACES
 interface SnapResult {
@@ -20,7 +23,7 @@ interface SnapResult {
 
 // Default Variables
 const SNAP_THRESHOLD = 25; // px
-const ORTHO_COLOR = { r: 0, g: 255, b: 0, a: 1.0 };
+const ORTHO_COLOR = { r: 0, g: 1, b: 0, a: 1.0 };
 const ORTHO_DASH_PX = 8;
 const ORTHO_GAP_PX = 6;
 const ORTHO_THICKNESS_PX = 1;
@@ -37,6 +40,8 @@ const App: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const serviceRef = useRef<RenderService | null>(null);
   const [debug, setDebug] = useState(true);
+
+
 
   // Selection service setup
   const [shiftHeldForSelection, setShiftHeldForSelection] = useState(false);
@@ -139,6 +144,30 @@ const App: React.FC = () => {
   // Track hovered vertices for constraint toggling
   const hoveredVerticesRef = useRef<Set<string>>(new Set());
 
+  // Custom Cursor
+  const [isDrawing, setIsDrawing] = useState(false);
+  const cursor = useCursor(activeTool, shiftHeld, isDrawing, !!panStart, currentTheme);
+  const [globalCursor, setGlobalCursor] = useState<string>(CURSORS.DEFAULT(currentTheme));
+  useEffect(() => {
+    const activeLayer = layerService.getActiveLayer();
+    const isLayerLocked = activeLayer?.properties.locked ?? false;
+    
+    let newCursor = CURSORS.DEFAULT(currentTheme);
+  
+    if (panStart) {
+      newCursor = CURSORS.PANNING;
+    } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
+      newCursor = CURSORS.DISABLED;
+    } else if (activeTool === 'SELECTION' && shiftHeld) {
+      newCursor = CURSORS.SELECT_SUBTRACT(currentTheme);
+    } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
+      newCursor = CURSORS.CROSSHAIR;
+    }
+  
+    setGlobalCursor(newCursor);
+  }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
+
+
 
   ////////// INITIALIZATION \\\\\\\\\\
   useEffect(() => {
@@ -171,6 +200,17 @@ const App: React.FC = () => {
       }
     };
     run();
+  }, []);
+
+  // Set initial theme class on mount
+  useEffect(() => {
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add(`theme-${currentTheme}`);
+    
+    // Cleanup on unmount
+    return () => {
+      document.body.classList.remove('theme-dark', 'theme-light');
+    };
   }, []);
 
   // Expose services to global scope for console testing
@@ -598,6 +638,15 @@ const App: React.FC = () => {
       const cursorWorld = constraintSnap ?? (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
       let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
 
+      // Set drawing state for non-selection tools
+      if (activeTool !== 'SELECTION') {
+        if (activeLayer && activeLayer.properties.locked) {
+          console.log('🚫 Cannot draw on locked layer');
+          return;
+        }
+        setIsDrawing(true);
+      }
+
       // Find intersection when currently drawing 
       if (currentStart) {
         intersectionSnap = snapResult.type === 'intersection' ? snapResult.position : null;
@@ -711,6 +760,7 @@ const App: React.FC = () => {
           
     } else if (evt.button === 1) {
       setPanStart({ x: pos.x, y: pos.y });
+      setIsDrawing(false);
     }
   };
 
@@ -731,6 +781,7 @@ const App: React.FC = () => {
       // Use immediate pan for smooth interaction
       CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
       
+      setIsDrawing(false);
       setPanStart({ x: pos.x, y: pos.y });
       redrawAll(previewEnd, snapResult);
       return;
@@ -816,7 +867,9 @@ const App: React.FC = () => {
   };
 
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
-    if (evt.button === 1) {
+    if (evt.button === 0) {
+      setIsDrawing(false);
+    } else if (evt.button === 1) {
       setPanStart(null);
       CommandAdapters.panFinal(offsetX, offsetY);
     }
@@ -867,6 +920,10 @@ const App: React.FC = () => {
   
     const currentColors = themeManager.getCurrentColors();
 
+    // 🎯 Update root element class for CSS theming
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add(`theme-${newTheme}`);
+
     // Update render service immediately
     if (serviceRef.current) {
       serviceRef.current.setGridConfig({
@@ -893,6 +950,27 @@ const App: React.FC = () => {
       serviceRef.current.setSelectionHandleColor(currentColors.selectionHandleColor);
     }
 
+    // 🎯 Immediately update cursor on canvas element
+    if (canvasRef.current) {
+      const activeLayer = layerService.getActiveLayer();
+      const isLayerLocked = activeLayer?.properties.locked ?? false;
+      
+      let newCursor = CURSORS.DEFAULT(newTheme);
+      
+      if (panStart) {
+        newCursor = CURSORS.PANNING;
+      } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
+        newCursor = CURSORS.DISABLED;
+      } else if (activeTool === 'SELECTION' && shiftHeld) {
+        newCursor = CURSORS.SELECT_SUBTRACT(newTheme);
+      } else {
+        newCursor = CURSORS.DEFAULT(newTheme);
+      }
+      
+      console.log('🎯 Immediate cursor update:', newCursor);
+      canvasRef.current.style.cursor = newCursor;
+    }
+
     // Update all rendering colors from theme
     setConstraintColor(currentColors.constraintColor);
     setOrthoConfig(prev => ({ ...prev, color: currentColors.orthoColor }));
@@ -910,12 +988,17 @@ const App: React.FC = () => {
 
   ////////// INTERFACE \\\\\\\\\\
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh" }}>
+    <div style={{ position: "relative",
+        width: "100vw", height: "100vh",
+        cursor: globalCursor }}>
+
       <canvas
         ref={canvasRef}
         width={canvasSize.w}
         height={canvasSize.h}
-        style={{ border: "none", display: "block", width: "100vw", height: "100vh", cursor: panStart ? "grabbing" : activeTool === 'SELECTION' ? "default" : "crosshair"  }}
+        style={{border: "none", display: "block",
+                 width: "100vw", height: "100vh", 
+                 cursor: cursor}}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
