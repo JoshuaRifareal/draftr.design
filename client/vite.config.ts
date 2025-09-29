@@ -6,7 +6,7 @@ export default defineConfig({
   base: './', // Important for SPA routing
   build: {
     outDir: 'dist',
-    assetsDir: 'assets'
+    assetsDir: 'assets',
   },
   server: {
     port: 3000
