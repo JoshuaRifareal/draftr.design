@@ -7,7 +7,7 @@ import { LayerPanel } from './LayerPanel/LayerPanel';
 import userIcon1 from '../assets/user-icon1.png';
 import draftrLogo from '../assets/joshuarifareal_logo.ico';
 
-type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE';
+type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE' | string;
 
 interface UIOverlayProps {
     scale: number;
@@ -19,7 +19,7 @@ interface UIOverlayProps {
     shiftHeld: boolean;
     orthoTempDisabled: boolean;
     activeTool: ToolType;
-    onToolChange: (tool: ToolType) => void;
+    onToolChange: (tool: string) => void;
     onThemeToggle: () => void;
     selectedPrimitiveIds: string[];
 }

@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from "react";
 import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
-import { snappingService, contextManager, type SnapType } from './services/SnappingService';
+import { snappingService, contextManager } from './services/SnappingService';
+import type { SnapResult, SnapType } from './services/SnappingService';
 import { ThemeManager, type Theme } from './services/ThemeManager';
 import { selectionService } from './services/SelectionService';
 import { layerService } from './services/LayerService';
@@ -12,14 +13,6 @@ import type { DrawingPrimitive } from './types/DraftrTypes';
 import { useCursor } from './components/Cursors/useCursor';
 import { CURSORS  } from './components/Cursors/cursors';
 
-
-// INTERFACES
-interface SnapResult {
-  position: { x: number; y: number };
-  type: 'none' | 'vertex' | 'intersection' | 'constraint' | 'ortho';
-  strength: number;
-  metadata?: any;
-}
 
 // Default Variables
 const SNAP_THRESHOLD = 25; // px
@@ -1013,7 +1006,7 @@ const App: React.FC = () => {
         shiftHeld={shiftHeld}
         orthoTempDisabled={orthoTempDisabled}
         activeTool={activeTool}
-        onToolChange={handleToolChange}
+        onToolChange={handleToolChange as (tool: string) => void}
         onThemeToggle={handleThemeToggle}
         selectedPrimitiveIds={selectedPrimitiveIds}
       />
