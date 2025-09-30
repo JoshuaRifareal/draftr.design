@@ -97,12 +97,12 @@ export const CommandBar: React.FC<CommandBarProps> = ({ onCommandSelect }) => {
   };
 
   // Adjust position if near screen edges
-  if (position.x + 330 > window.innerWidth) {
-    style.left = position.x - 320 - 10;
-  }
-  if (position.y + 410 > window.innerHeight) {
-    style.top = position.y - 400 - 10;
-  }
+  // if (position.x + 330 > window.innerWidth) {
+  //   style.left = position.x - 320 - 10;
+  // }
+  // if (position.y + 410 > window.innerHeight) {
+  //   style.top = position.y - 400 - 10;
+  // }
 
   return (
     <div className="command-bar-overlay">

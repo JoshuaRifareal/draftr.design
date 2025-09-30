@@ -22,6 +22,7 @@ export interface ThemeColors {
     '--actionBar-bg': string;
     '--toolButton-bg': string;
     '--toolButton-active-bg': string;
+    '--inputArea-bg': string,
     '--modeBar-bg': string;
     // Extended colors
     '--text-primary': string;
@@ -69,6 +70,7 @@ export class ThemeManager {
         '--actionBar-bg': '#1c1c1e',
         '--toolButton-bg': '#262628',
         '--toolButton-active-bg': '#5f51ff',
+        '--inputArea-bg': '#262628',
         '--modeBar-bg': '#3c3c3c',
         '--text-primary': '#ffffff',
         '--text-secondary': '#cccccc',
@@ -103,6 +105,7 @@ export class ThemeManager {
         '--actionBar-bg': 'rgba(255, 255, 255, 0.95)',
         '--toolButton-bg': '#f5f5f5',
         '--toolButton-active-bg': '#5f51ff',
+        '--inputArea-bg': '#e8e8e8',
         '--modeBar-bg': '#f5f5f5',
         '--text-primary': '#000000',
         '--text-secondary': '#666666',

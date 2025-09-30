@@ -9,6 +9,7 @@
   --actionBar-bg: rgba(45, 45, 48, 0.95);
   --toolButton-bg: #3c3c3c;
   --toolButton-active-bg: #5f51ff;
+  --inputArea-bg: #262628;
   --modeBar-bg: #3c3c3c;
   --text-primary: #ffffff;
   --text-secondary: #cccccc;
@@ -223,7 +224,7 @@ html, body, #app {
         fill: var(--svg-active-color, white);
       }
       &.rectangle>svg {
-        stroke: var(--svg-active-color);
+        stroke: var(--svg-active-color, white);
         fill: none;
       }
     }
