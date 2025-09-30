@@ -949,7 +949,7 @@ const App: React.FC = () => {
 
       CommandAdapters.updatePreview(preview);
       debouncedRedraw(preview, snapResult);
-    }, 32),
+    }, 8),
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
       findSnap, screenToWorld, snappingService, debouncedRedraw, previewEnd,
@@ -1088,6 +1088,7 @@ const App: React.FC = () => {
     } else if (evt.button === 1) {
       setPanStart(null);
       CommandAdapters.panFinal(offsetX, offsetY);
+      redrawAll(previewEnd, snapResult);
     }
   };
 

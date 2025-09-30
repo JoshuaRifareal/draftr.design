@@ -52,7 +52,7 @@ export class SelectionService {
     }
     this.cacheTimeout = window.setTimeout(() => {
       this.clearCache();
-    }, 1000);
+    }, 5000);
   }
 
   // Registration with layer awareness
