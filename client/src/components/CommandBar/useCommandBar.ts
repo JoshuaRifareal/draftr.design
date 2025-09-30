@@ -48,7 +48,13 @@ export const useCommandBar = (): UseCommandBarReturn => {
 
       const activeElement = document.activeElement;
       const isTypingInInput = activeElement?.tagName === 'INPUT' || 
-                              activeElement?.tagName === 'TEXTAREA';
+                              activeElement?.tagName === 'TEXTAREA' ||
+                              activeElement?.getAttribute('contenteditable') === 'true';
+
+      // If user is typing in any input, ignore command bar activation
+      if (isTypingInInput) {
+        return;
+      }
 
       // Ctrl+K activation
       if (e.ctrlKey && e.key === 'k') {
@@ -61,7 +67,7 @@ export const useCommandBar = (): UseCommandBarReturn => {
       }
 
       // Type-to-activate (ignore if command bar already open)
-      if (!isOpen && shouldActivateOnType(e)) {
+      if (!isOpen && shouldActivateOnType(e) && !isTypingInInput) {
         e.preventDefault();
         openCommandBar(currentMousePos.x, currentMousePos.y);
         setSearchQuery(e.key); // Start with the typed character

@@ -121,12 +121,20 @@
   }
 }
 
-.orphanedSection {
-  opacity: 0.5;
+.orphanedSection>.layerInfo {
+  .layerName {
+    opacity: 50%;
+  }
+
+  .primitiveCount {
+    opacity: 25%;
+  }
 }
 
 .addingLayer {
-  background: var(--toolButton-bg);
+  &:hover {
+    background: none !important;
+  }
 
   .layerNameInput {
     font-size: 12px;
@@ -135,7 +143,7 @@
     width: 100%;
     border: 1px solid var(--border-color);
     border-radius: 8px;
-    background: var(--panelBody-bg);
+    background: var(--inputArea-bg);
     color: var(--text-primary);
   
     &:focus {
