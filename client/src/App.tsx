@@ -229,30 +229,8 @@ const App: React.FC = () => {
     } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
       newCursor = CURSORS.CROSSHAIR;
     }
-  
     setGlobalCursor(newCursor);
   }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
-
-  // Update performance metrics periodically when overlay is shown
-  useEffect(() => {
-    if (!showPerformance) return;
-    
-    const interval = setInterval(() => {
-      setPerformanceMetrics(performanceMonitor.getMetrics());
-    }, 1000);
-    
-    return () => clearInterval(interval);
-  }, [showPerformance, performanceMonitor]);
-
-  // 🎯 PERFORMANCE: Monitor frame rate
-  useEffect(() => {
-    const updateMetrics = () => {
-      performanceMonitor.updateFrameRate();
-    };
-    
-    const interval = setInterval(updateMetrics, 1000);
-    return () => clearInterval(interval);
-  }, [performanceMonitor]);
 
   // Error display component
   const ErrorDisplay: React.FC<{ error: string | null; onDismiss: () => void }> = ({ error, onDismiss }) => {
@@ -333,358 +311,6 @@ const App: React.FC = () => {
       </div>
     );
   };
-
-  ////////// INITIALIZATION \\\\\\\\\\
-  useEffect(() => {
-    const run = async () => {
-      await init();
-      if (canvasRef.current) {
-        const service = new RenderService(canvasRef.current);
-        serviceRef.current = service;
-  
-        // Set initial transform values
-        service.setTransform(offsetX, offsetY, scale);
-  
-        // Set orthogonal defaults
-        service.setOrthoConfig(orthoConfigMemo);
-        
-        // Set grid defaults  
-        service.setGridConfig(gridConfigMemo);
-
-        // Set canvas and selection color
-        service.setCanvasColor(
-          canvasColor.r, canvasColor.g, canvasColor.b, canvasColor.a
-        );
-        service.setSelectionColor(
-          selectionColor.r, selectionColor.g, selectionColor.b, selectionColor.a
-        );
-  
-        service.clear();
-        service.resize(canvasSize.w, canvasSize.h);
-        service.drawGrid(offsetX, offsetY, scale);
-      }
-    };
-    run();
-  }, []);
-
-  // Set initial theme class on mount
-  useEffect(() => {
-    document.body.classList.remove('theme-dark', 'theme-light');
-    document.body.classList.add(`theme-${currentTheme}`);
-    
-    // Cleanup on unmount
-    return () => {
-      document.body.classList.remove('theme-dark', 'theme-light');
-    };
-  }, []);
-
-  // Expose services to global scope for console testing
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      (window as any).themeManager = themeManager;
-      (window as any).layerService = layerService;
-      (window as any).selectionService = selectionService;
-      (window as any).renderService = serviceRef.current;
-      (window as any).appStateStore = appStateStore;
-      (window as any).CommandAdapters = CommandAdapters;
-      (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
-      
-      // 🎯 PERFORMANCE: Add performance testing
-      (window as any).testPerformance = () => {
-        console.log('🧪 Testing Performance...');
-        
-        // Test 1: Measure redraw performance
-        console.log('📋 Test 1: Redraw performance');
-        const metrics = performanceMonitor.getMetrics();
-        console.log('Current Performance Metrics:', metrics);
-        
-        // Test 2: Create many primitives to test scaling
-        console.log('📋 Test 2: Scaling test (creating 100 primitives)');
-        const startTime = performance.now();
-        
-        for (let i = 0; i < 100; i++) {
-          const testPrimitive: DrawingPrimitive = {
-            id: `perf-test-${i}`,
-            type: 'line',
-            data: [i * 10, i * 10, i * 10 + 50, i * 10 + 50, 1, 1, 1, 1],
-            layerId: null
-          };
-          CommandAdapters.drawLine(testPrimitive);
-        }
-        
-        const endTime = performance.now();
-        console.log(`Created 100 primitives in ${(endTime - startTime).toFixed(2)}ms`);
-        
-        // Test 3: Selection performance
-        console.log('📋 Test 3: Selection performance');
-        const selectionStart = performance.now();
-        selectionService.selectByRectangle(
-          { x: 0, y: 0 },
-          { x: 1000, y: 1000 }
-        );
-        const selectionEnd = performance.now();
-        console.log(`Rectangle selection took ${(selectionEnd - selectionStart).toFixed(2)}ms`);
-        
-        // Test 4: Memory usage
-        console.log('📋 Test 4: Memory usage');
-        console.log('Performance Metrics:', performanceMonitor.getMetrics());
-        
-        return true;
-      };
-      
-      (window as any).getPerformanceMetrics = () => performanceMonitor.getMetrics();
-      (window as any).resetPerformanceMetrics = () => performanceMonitor.reset();
-      (window as any).togglePerformanceOverlay = () => setShowPerformance(prev => !prev);
-
-      // Error testing
-      (window as any).testErrorHandling = () => {
-        console.log('🧪 Testing Error Handling...');
-        
-        try {
-          // Test 1: Invalid layer assignment
-          console.log('📋 Test 1: Invalid layer assignment');
-          layerService.assignPrimitiveToLayer('test-primitive', 'non-existent-layer');
-        } catch (error) {
-          console.log('✅ Expected error caught:', getErrorMessage(error));
-        }
-        
-        // Test 2: Invalid primitive registration
-        console.log('📋 Test 2: Invalid primitive registration');
-        try {
-          selectionService.registerPrimitiveWithId('', 'line', []);
-        } catch (error) {
-          console.log('✅ Expected error caught:', getErrorMessage(error));
-        }
-        
-        // Test 3: Test error boundary
-        console.log('📋 Test 3: Testing error boundary (check console for boundary catch)');
-        
-        return true;
-      };
-    }
-  }, [serviceRef.current]);
-
-  // Subscribe to AppStateStore changes
-  useEffect(() => {
-    const unsubscribe = appStateStore.subscribe((newState: AppState) => {
-      setAppState(newState);
-    });
-    return unsubscribe;
-  }, []);
-
-  // Register lines with selection service
-  useEffect(() => {
-    selectionService.clearAll();
-  
-    primitives.forEach(primitive => {
-      selectionService.registerPrimitiveWithId(primitive.id, primitive.type, primitive.data, primitive.layerId);
-    });
-  }, [primitives]);
-
-  // Snapping config update on mount
-  useEffect(() => {
-    snappingService.updateConfig({
-      thresholdPx: SNAP_THRESHOLD,
-      constraintEnabled: orthoSnapEnabled,
-      orthoEnabled: orthoSnapEnabled,
-      orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
-      orthoAnglesDeg: ORTHO_ANGLES_DEG,
-    });
-  }, [orthoSnapEnabled]);
-
-  // Context manager update when state changes
-  useEffect(() => {
-    contextManager.updateContext({
-      primitives,
-      vertexConstraints,
-      activeConstraint,
-      currentStart,
-      shiftHeld,
-      orthoTempDisabled,
-      constraintTempDisabled,
-      scale,
-      offsetX,
-      offsetY
-    });
-  }, [primitives, vertexConstraints, activeConstraint, currentStart, shiftHeld, 
-      orthoTempDisabled, constraintTempDisabled, scale, offsetX, offsetY]);
-
-  // Color configuration
-  useEffect(() => {
-    if (serviceRef.current) {
-      serviceRef.current.setCanvasColor(
-        canvasColor.r, canvasColor.g, canvasColor.b, canvasColor.a
-      );
-      serviceRef.current.setSelectionColor(
-        selectionColor.r, selectionColor.g, selectionColor.b, selectionColor.a
-      );
-      
-      // Redraw to apply the new canvas background color immediately
-      redrawAll(previewEnd, snapResult);
-    }
-  }, [canvasColor, selectionColor]);
-
-  // Handle Resize
-  useEffect(() => {
-    const handleResize = () => {
-      const w = window.innerWidth;
-      const h = window.innerHeight;
-      setCanvasSize({ w, h });
-      if (canvasRef.current) {
-        canvasRef.current.width = w * window.devicePixelRatio;
-        canvasRef.current.height = h * window.devicePixelRatio;
-        canvasRef.current.style.width = w + 'px';
-        canvasRef.current.style.height = h + 'px';
-      }
-      if (serviceRef.current) {
-        serviceRef.current.resize(w, h);
-        redrawAll(previewEnd, snapResult);
-      }
-    };
-
-    window.addEventListener("resize", handleResize);
-    handleResize();
-    return () => window.removeEventListener("resize", handleResize);
-  }, [primitives, scale, offsetX, offsetY, previewEnd, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
-
-  // Global error handlers
-  useEffect(() => {
-    const handleGlobalError = (event: ErrorEvent) => {
-      console.error('🚨 Global error caught:', event.error);
-      setError(getErrorMessage(event.error));
-    };
-
-    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-      console.error('🚨 Unhandled promise rejection:', event.reason);
-      setError(getErrorMessage(event.reason));
-      event.preventDefault();
-    };
-
-    window.addEventListener('error', handleGlobalError);
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-
-    return () => {
-      window.removeEventListener('error', handleGlobalError);
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
-  }, []);
-
-  // Keyboard listeners
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "Escape" || e.key === "F11") {
-        e.preventDefault();
-      }
-
-      if (e.key === "Shift") setShiftHeld(true);
-      if (e.key === "F8") {
-        const newOrthoEnabled = !orthoSnapEnabled;
-        setOrthoSnapEnabled(newOrthoEnabled);
-        
-        snappingService.updateConfig({
-          orthoEnabled: newOrthoEnabled
-        });
-        
-        logDebug("Ortho snap toggled:", newOrthoEnabled);
-      }
-      if (e.key === "F9") {
-        const newConstraintEnabled = !snappingService.getConfig().constraintEnabled;
-        
-        snappingService.updateConfig({ 
-          constraintEnabled: newConstraintEnabled 
-        });
-
-        if (!newConstraintEnabled) {
-          CommandAdapters.clearVertexConstraints();
-          CommandAdapters.setActiveConstraint(null);
-          hoveredVerticesRef.current.clear();
-        }
-        logDebug("Constraint snap toggled:", newConstraintEnabled);
-      }
-      if (e.key === "F10") {
-        e.stopPropagation(); 
-        handleThemeToggle();
-        return; 
-      }
-      if (e.key === "F11") {
-        e.preventDefault();
-        setShowPerformance(prev => !prev);
-        console.log('📊 Performance overlay toggled');
-      }
-      if (e.key === "Escape") {
-        CommandAdapters.setSelection([]);
-        CommandAdapters.setActiveTool('SELECTION');
-        resetTool();
-      }
-      if (e.ctrlKey || e.metaKey) {
-        if (e.key === "z" || e.key === "Z") {
-          e.preventDefault();
-          if (e.shiftKey) {
-            appStateStore.redo();
-            console.log("🔁 Redo triggered");
-          } else {
-            appStateStore.undo();
-            console.log("⏪ Undo triggered");
-          }
-        }
-        if (e.key === "y" || e.key === "Y") {
-          e.preventDefault();
-          appStateStore.redo();
-          console.log("🔁 Redo triggered");
-        }
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "Shift") setShiftHeld(false);
-    };
-
-    window.addEventListener("keydown", onKeyDown, { capture: true });
-    window.addEventListener("keyup", onKeyUp, { capture: true });
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("keyup", onKeyUp);
-    };
-  }, [orthoSnapEnabled]);
-
-  // Zoom functionality
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const handleWheel = (evt: WheelEvent) => {
-      evt.preventDefault();
-      const pos = getMousePos(evt);
-    
-      const oldScale = scale;
-      const oldOffsetX = offsetX;
-      const oldOffsetY = offsetY;
-    
-      const worldBeforeX = pos.x / oldScale - oldOffsetX;
-      const worldBeforeY = pos.y / oldScale - oldOffsetY;
-    
-      const delta = -evt.deltaY * 0.001;
-      let newScale = oldScale * (1 + delta);
-      newScale = Math.max(0.05, Math.min(20000, newScale));
-    
-      const newOffsetX = pos.x / newScale - worldBeforeX;
-      const newOffsetY = pos.y / newScale - worldBeforeY;
-    
-      CommandAdapters.zoom(newScale, newOffsetX, newOffsetY);
-    };
-
-    canvas.addEventListener("wheel", handleWheel, { passive: false });
-    return () => canvas.removeEventListener("wheel", handleWheel);
-  }, [scale, offsetX, offsetY]);
-
-  // Redraw all states
-  useEffect(() => {
-    redrawAll(previewEnd, snapResult);
-  }, [primitives, scale, offsetX, offsetY, previewEnd, 
-      lineColor, snapColor, snapResult, orthoConfig, 
-      shiftHeld, orthoSnapEnabled, orthoTempDisabled, 
-      vertexConstraints, activeConstraint, gridConfig, 
-      canvasColor, selectionColor, currentTheme, 
-      selectionHighlightColor, selectionHandleColor]);
 
   // Custom debug logger
   const logDebug = (...args: any[]) => {
@@ -864,8 +490,394 @@ const App: React.FC = () => {
     return orthoSnapEnabled && !orthoTempDisabled;
   };
 
-  // 🎯 PERFORMANCE: Throttled mouse move handler
+
+  
+  ////////// INITIALIZATION \\\\\\\\\\
+  
+  useEffect(() => {
+    const run = async () => {
+      await init();
+      if (canvasRef.current) {
+        const service = new RenderService(canvasRef.current);
+        serviceRef.current = service;
+  
+        // Set initial transform values
+        service.setTransform(offsetX, offsetY, scale);
+  
+        // Set orthogonal defaults
+        service.setOrthoConfig(orthoConfigMemo);
+        
+        // Set grid defaults  
+        service.setGridConfig(gridConfigMemo);
+
+        // Set canvas and selection color
+        service.setCanvasColor(
+          canvasColor.r, canvasColor.g, canvasColor.b, canvasColor.a
+        );
+        service.setSelectionColor(
+          selectionColor.r, selectionColor.g, selectionColor.b, selectionColor.a
+        );
+  
+        service.clear();
+        service.resize(canvasSize.w, canvasSize.h);
+        service.drawGrid(offsetX, offsetY, scale);
+      }
+    };
+    run();
+  }, []);
+
+  // Monitor frame rate
+  useEffect(() => {
+    const updateMetrics = () => {
+      performanceMonitor.updateFrameRate();
+    };
+    
+    let animationFrameId: number;
+    const updateLoop = () => {
+      updateMetrics();
+      animationFrameId = requestAnimationFrame(updateLoop);
+    };
+    animationFrameId = requestAnimationFrame(updateLoop);
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [performanceMonitor]);
+  useEffect(() => {
+    // Update performance metrics periodically when overlay is shown
+    if (!showPerformance) return;
+    
+    const interval = setInterval(() => {
+      setPerformanceMetrics(performanceMonitor.getMetrics());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [showPerformance, performanceMonitor]);
+
+  // Set initial theme class on mount
+  useEffect(() => {
+    document.body.classList.remove('theme-dark', 'theme-light');
+    document.body.classList.add(`theme-${currentTheme}`);
+    
+    // Cleanup on unmount
+    return () => {
+      document.body.classList.remove('theme-dark', 'theme-light');
+    };
+  }, []);
+
+  // Expose services to global scope for console testing
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).themeManager = themeManager;
+      (window as any).layerService = layerService;
+      (window as any).selectionService = selectionService;
+      (window as any).renderService = serviceRef.current;
+      (window as any).appStateStore = appStateStore;
+      (window as any).CommandAdapters = CommandAdapters;
+      (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
+      
+      // 🎯 PERFORMANCE: Add performance testing
+      (window as any).testPerformance = () => {
+        console.log('🧪 Testing Performance...');
+        
+        // Test 1: Measure redraw performance
+        console.log('📋 Test 1: Redraw performance');
+        const metrics = performanceMonitor.getMetrics();
+        console.log('Current Performance Metrics:', metrics);
+        
+        // Test 2: Create many primitives to test scaling
+        console.log('📋 Test 2: Scaling test (creating 100 primitives)');
+        const startTime = performance.now();
+        
+        for (let i = 0; i < 100; i++) {
+          const testPrimitive: DrawingPrimitive = {
+            id: `perf-test-${i}`,
+            type: 'line',
+            data: [i * 10, i * 10, i * 10 + 50, i * 10 + 50, 1, 1, 1, 1],
+            layerId: null
+          };
+          CommandAdapters.drawLine(testPrimitive);
+        }
+        
+        const endTime = performance.now();
+        console.log(`Created 100 primitives in ${(endTime - startTime).toFixed(2)}ms`);
+        
+        // Test 3: Selection performance
+        console.log('📋 Test 3: Selection performance');
+        const selectionStart = performance.now();
+        selectionService.selectByRectangle(
+          { x: 0, y: 0 },
+          { x: 1000, y: 1000 }
+        );
+        const selectionEnd = performance.now();
+        console.log(`Rectangle selection took ${(selectionEnd - selectionStart).toFixed(2)}ms`);
+        
+        // Test 4: Memory usage
+        console.log('📋 Test 4: Memory usage');
+        console.log('Performance Metrics:', performanceMonitor.getMetrics());
+        
+        return true;
+      };
+      
+      (window as any).getPerformanceMetrics = () => performanceMonitor.getMetrics();
+      (window as any).resetPerformanceMetrics = () => performanceMonitor.reset();
+      (window as any).togglePerformanceOverlay = () => setShowPerformance(prev => !prev);
+
+      // Error testing
+      (window as any).testErrorHandling = () => {
+        console.log('🧪 Testing Error Handling...');
+        
+        try {
+          // Test 1: Invalid layer assignment
+          console.log('📋 Test 1: Invalid layer assignment');
+          layerService.assignPrimitiveToLayer('test-primitive', 'non-existent-layer');
+        } catch (error) {
+          console.log('✅ Expected error caught:', getErrorMessage(error));
+        }
+        
+        // Test 2: Invalid primitive registration
+        console.log('📋 Test 2: Invalid primitive registration');
+        try {
+          selectionService.registerPrimitiveWithId('', 'line', []);
+        } catch (error) {
+          console.log('✅ Expected error caught:', getErrorMessage(error));
+        }
+        
+        // Test 3: Test error boundary
+        console.log('📋 Test 3: Testing error boundary (check console for boundary catch)');
+        
+        return true;
+      };
+    }
+  }, [serviceRef.current]);
+
+  // Subscribe to AppStateStore changes
+  useEffect(() => {
+    const unsubscribe = appStateStore.subscribe((newState: AppState) => {
+      setAppState(newState);
+    });
+    return unsubscribe;
+  }, []);
+
+  // Register lines with selection service
+  useEffect(() => {
+    selectionService.clearAll();
+  
+    primitives.forEach(primitive => {
+      selectionService.registerPrimitiveWithId(primitive.id, primitive.type, primitive.data, primitive.layerId);
+    });
+  }, [primitives]);
+
+  // Snapping config update on mount
+  useEffect(() => {
+    snappingService.updateConfig({
+      thresholdPx: SNAP_THRESHOLD,
+      constraintEnabled: orthoSnapEnabled,
+      orthoEnabled: orthoSnapEnabled,
+      orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
+      orthoAnglesDeg: ORTHO_ANGLES_DEG,
+    });
+  }, [orthoSnapEnabled]);
+
+  // Context manager update when state changes
+  useEffect(() => {
+    contextManager.updateContext({
+      primitives,
+      vertexConstraints,
+      activeConstraint,
+      currentStart,
+      shiftHeld,
+      orthoTempDisabled,
+      constraintTempDisabled,
+      scale,
+      offsetX,
+      offsetY
+    });
+  }, [primitives, vertexConstraints, activeConstraint, currentStart, shiftHeld, 
+  orthoTempDisabled, constraintTempDisabled, scale, offsetX, offsetY]);
+
+  // Color configuration
+  useEffect(() => {
+    if (serviceRef.current) {
+      serviceRef.current.setCanvasColor(
+        canvasColor.r, canvasColor.g, canvasColor.b, canvasColor.a
+      );
+      serviceRef.current.setSelectionColor(
+        selectionColor.r, selectionColor.g, selectionColor.b, selectionColor.a
+      );
+      
+      // Redraw to apply the new canvas background color immediately
+      redrawAll(previewEnd, snapResult);
+    }
+  }, [canvasColor, selectionColor]);
+
+  // Handle Resize
+  useEffect(() => {
+    const handleResize = () => {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      setCanvasSize({ w, h });
+      if (canvasRef.current) {
+        canvasRef.current.width = w * window.devicePixelRatio;
+        canvasRef.current.height = h * window.devicePixelRatio;
+        canvasRef.current.style.width = w + 'px';
+        canvasRef.current.style.height = h + 'px';
+      }
+      if (serviceRef.current) {
+        serviceRef.current.resize(w, h);
+        redrawAll(previewEnd, snapResult);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    handleResize();
+    return () => window.removeEventListener("resize", handleResize);
+  }, [primitives, scale, offsetX, offsetY, previewEnd, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
+
+  // Global error handlers
+  
+  useEffect(() => {
+    const handleGlobalError = (event: ErrorEvent) => {
+      console.error('🚨 Global error caught:', event.error);
+      setError(getErrorMessage(event.error));
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('🚨 Unhandled promise rejection:', event.reason);
+      setError(getErrorMessage(event.reason));
+      event.preventDefault();
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
+  // Keyboard listeners
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "Escape" || e.key === "F11") {
+        e.preventDefault();
+      }
+
+      if (e.key === "Shift") setShiftHeld(true);
+      if (e.key === "F8") {
+        const newOrthoEnabled = !orthoSnapEnabled;
+        setOrthoSnapEnabled(newOrthoEnabled);
+        
+        snappingService.updateConfig({
+          orthoEnabled: newOrthoEnabled
+        });
+        
+        logDebug("Ortho snap toggled:", newOrthoEnabled);
+      }
+      if (e.key === "F9") {
+        const newConstraintEnabled = !snappingService.getConfig().constraintEnabled;
+        
+        snappingService.updateConfig({ 
+          constraintEnabled: newConstraintEnabled 
+        });
+
+        if (!newConstraintEnabled) {
+          CommandAdapters.clearVertexConstraints();
+          CommandAdapters.setActiveConstraint(null);
+          hoveredVerticesRef.current.clear();
+        }
+        logDebug("Constraint snap toggled:", newConstraintEnabled);
+      }
+      if (e.key === "F10") {
+        e.stopPropagation(); 
+        handleThemeToggle();
+        return; 
+      }
+      if (e.key === "F11") {
+        e.preventDefault();
+        setShowPerformance(prev => !prev);
+        console.log('📊 Performance overlay toggled');
+      }
+      if (e.key === "Escape") {
+        CommandAdapters.setSelection([]);
+        CommandAdapters.setActiveTool('SELECTION');
+        resetTool();
+      }
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "z" || e.key === "Z") {
+          e.preventDefault();
+          if (e.shiftKey) {
+            appStateStore.redo();
+            console.log("🔁 Redo triggered");
+          } else {
+            appStateStore.undo();
+            console.log("⏪ Undo triggered");
+          }
+        }
+        if (e.key === "y" || e.key === "Y") {
+          e.preventDefault();
+          appStateStore.redo();
+          console.log("🔁 Redo triggered");
+        }
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShiftHeld(false);
+    };
+
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    window.addEventListener("keyup", onKeyUp, { capture: true });
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [orthoSnapEnabled]);
+
+  // Zoom functionality
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleWheel = (evt: WheelEvent) => {
+      evt.preventDefault();
+      const pos = getMousePos(evt);
+    
+      const oldScale = scale;
+      const oldOffsetX = offsetX;
+      const oldOffsetY = offsetY;
+    
+      const worldBeforeX = pos.x / oldScale - oldOffsetX;
+      const worldBeforeY = pos.y / oldScale - oldOffsetY;
+    
+      const delta = -evt.deltaY * 0.001;
+      let newScale = oldScale * (1 + delta);
+      newScale = Math.max(0.05, Math.min(20000, newScale));
+    
+      const newOffsetX = pos.x / newScale - worldBeforeX;
+      const newOffsetY = pos.y / newScale - worldBeforeY;
+    
+      CommandAdapters.zoom(newScale, newOffsetX, newOffsetY);
+    };
+
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
+    return () => canvas.removeEventListener("wheel", handleWheel);
+  }, [scale, offsetX, offsetY]);
+
+  // Redraw all states
+  useEffect(() => {
+    redrawAll(previewEnd, snapResult);
+  }, [primitives, scale, offsetX, offsetY, previewEnd, 
+  lineColor, snapColor, snapResult, orthoConfig, 
+  shiftHeld, orthoSnapEnabled, orthoTempDisabled, 
+  vertexConstraints, activeConstraint, gridConfig, 
+  canvasColor, selectionColor, currentTheme, 
+  selectionHighlightColor, selectionHandleColor]);
+
+
+  ////////// INTERACTION HANDLERS \\\\\\\\\\
+
   const handleMouseMove = useCallback(
+    // Throttled mouse move handler
     throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = getMousePos(evt);
       const snapResult = findSnap(pos);
@@ -890,8 +902,16 @@ const App: React.FC = () => {
       // Selection rectangle
       if (activeTool === 'SELECTION' && selectionStart) {
         const cursorWorld = screenToWorld(pos.x, pos.y);
-        CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
-        debouncedRedraw(previewEnd, snapResult);
+        // Only update if position changed significantly (reduces flicker)
+        const distanceMoved = Math.sqrt(
+          Math.pow(cursorWorld.x - (selectionEnd?.x || selectionStart.x), 2) +
+          Math.pow(cursorWorld.y - (selectionEnd?.y || selectionStart.y), 2)
+        );
+        
+        if (distanceMoved > 0.5) { // Threshold to reduce micro-updates
+          CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
+          redrawAll(previewEnd, snapResult);
+        }
         return;
       }
 
@@ -949,7 +969,7 @@ const App: React.FC = () => {
 
       CommandAdapters.updatePreview(preview);
       debouncedRedraw(preview, snapResult);
-    }, 8),
+    }, 8), // 8ms throttle for overall handlers except SELECTION
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
       findSnap, screenToWorld, snappingService, debouncedRedraw, previewEnd,
@@ -1200,6 +1220,8 @@ const App: React.FC = () => {
     
     redrawAll(previewEnd, snapResult);
   };
+
+  
 
   ////////// INTERFACE \\\\\\\\\\
   return (

@@ -52,13 +52,15 @@ export class PerformanceMonitor {
   }
 
   updateFrameRate() {
-    this.frameCount++;
     const now = performance.now();
-    if (now - this.lastFrameTime >= 1000) {
-      this.metrics.frameRate = Math.round((this.frameCount * 1000) / (now - this.lastFrameTime));
+    const elapsed = now - this.lastFrameTime;
+    
+    if (elapsed >= 1000) {
+      this.metrics.frameRate = Math.round((this.frameCount * 1000) / elapsed);
       this.frameCount = 0;
       this.lastFrameTime = now;
     }
+    this.frameCount++;
   }
 
   getMetrics(): PerformanceMetrics {
