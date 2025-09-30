@@ -1,5 +1,6 @@
 import { CommandAdapters } from '../../services/CommandAdapters';
 import { appStateStore } from '../../services/AppStateStore';
+import { getErrorMessage, safeAsync } from '../../utils/errorHandling';
 
 // Command interface - SIMPLIFIED (no context parameter)
 export interface Command {
@@ -152,7 +153,16 @@ export const commandRegistry: Command[] = [
     category: 'tools',
     aliases: ['select', 'selection', 'arrow', 'cursor', 'sel', 'pick', 'marquee'],
     execute: async () => {
-      CommandAdapters.setActiveTool('SELECTION');
+      const { error } = await safeAsync(async () => {
+        CommandAdapters.setActiveTool('SELECTION');
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 selection-tool command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -163,7 +173,16 @@ export const commandRegistry: Command[] = [
     category: 'tools',
     aliases: ['line', 'add', 'draw', 'pen', 'stroke', 'ln', 'lin', 'segment', 'vector'],
     execute: async () => {
-      CommandAdapters.setActiveTool('LINE');
+      const { error } = await safeAsync(async () => {
+        CommandAdapters.setActiveTool('LINE');
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 line-tool command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -174,7 +193,16 @@ export const commandRegistry: Command[] = [
     category: 'tools',
     aliases: ['rectangle', 'rect', 'box', 'rec', 'quad', 'polygon'],
     execute: async () => {
-      CommandAdapters.setActiveTool('RECTANGLE');
+      const { error } = await safeAsync(async () => {
+        CommandAdapters.setActiveTool('RECTANGLE');
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 rectangle-tool command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -185,7 +213,16 @@ export const commandRegistry: Command[] = [
     category: 'tools',
     aliases: ['circle', 'ellipse', 'round', 'oval', 'cir', 'circ', 'crcl', 'ellips'],
     execute: async () => {
-      CommandAdapters.setActiveTool('CIRCLE');
+      const { error } = await safeAsync(async () => {
+        CommandAdapters.setActiveTool('CIRCLE');
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 circle-tool command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -198,9 +235,18 @@ export const commandRegistry: Command[] = [
     category: 'view',
     aliases: ['zoomin', 'zoom+', 'larger', 'bigger', 'zin', 'closeup', 'magnify'],
     execute: async () => {
-      const currentState = appStateStore.getState();
-      const newScale = currentState.scale * 1.2;
-      CommandAdapters.zoom(newScale, currentState.offsetX, currentState.offsetY);
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        const newScale = currentState.scale * 1.2;
+        CommandAdapters.zoom(newScale, currentState.offsetX, currentState.offsetY);
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 zoom-in command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -211,9 +257,18 @@ export const commandRegistry: Command[] = [
     category: 'view',
     aliases: ['zoomout', 'zoom-', 'smaller', 'zout', 'overview', 'wide'],
     execute: async () => {
-      const currentState = appStateStore.getState();
-      const newScale = currentState.scale / 1.2;
-      CommandAdapters.zoom(Math.max(0.05, newScale), currentState.offsetX, currentState.offsetY);
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        const newScale = currentState.scale / 1.2;
+        CommandAdapters.zoom(Math.max(0.05, newScale), currentState.offsetX, currentState.offsetY);
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 zoom-out command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -224,8 +279,17 @@ export const commandRegistry: Command[] = [
     category: 'view',
     aliases: ['resetzoom', 'actualsize', '100%', 'normal', 'defaultzoom', 'origin'],
     execute: async () => {
-      const currentState = appStateStore.getState();
-      CommandAdapters.zoom(1.0, currentState.offsetX, currentState.offsetY);
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        CommandAdapters.zoom(1.0, currentState.offsetX, currentState.offsetY);
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 reset-zoom command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -238,7 +302,16 @@ export const commandRegistry: Command[] = [
     category: 'edit',
     aliases: ['clear', 'reset'],
     execute: async () => {
-      CommandAdapters.clearCanvas();
+      const { error } = await safeAsync(async () => {
+        CommandAdapters.clearCanvas();
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 clear-canvas command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },
@@ -249,8 +322,17 @@ export const commandRegistry: Command[] = [
     category: 'edit',
     aliases: ['delete', 'x', 'del', 'remove'],
     execute: async (params?: { selectedIds: string[] }) => {
-      const selectedIds = params?.selectedIds || [];
-      CommandAdapters.deleteSelected(selectedIds);
+      const { error } = await safeAsync(async () => {
+        const selectedIds = params?.selectedIds || [];
+        CommandAdapters.deleteSelected(selectedIds);
+        return { success: true };
+      }, { success: false });
+
+      if (error) {
+        console.error('🚨 delete-selected command failed:', error);
+        return { success: false, error };
+      }
+      
       return { success: true };
     }
   },

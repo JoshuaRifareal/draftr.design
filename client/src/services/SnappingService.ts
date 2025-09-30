@@ -7,25 +7,15 @@
 // 6. Temporary state management
 
 import type { DrawingPrimitive } from '../types/DraftrTypes';
-
-// ===== INTERFACES AND TYPES =====
-export type SnapType = 
-  | 'vertex' 
-  | 'ortho' 
-  | 'constraint' 
-  | 'intersection' 
-  | 'midpoint'
-  | 'perpendicular' 
-  | 'center'
-  | 'none';
+import type { SnapType, Point, ConstraintType } from '../types/ToolTypes';
 
 export interface SnapResult {
-  position: { x: number; y: number };
+  position: Point;
   type: SnapType;
   metadata?: {
-    vertex?: { x: number; y: number };
+    vertex?: Point;
     angleDeg?: number;
-    constraint?: { x: number; y: number; type: 'horizontal' | 'vertical' };
+    constraint?: { x: number; y: number; type: ConstraintType }; // Was: 'horizontal' | 'vertical'
     segment?: { x1: number; y1: number; x2: number; y2: number };
   };
   strength: number;
@@ -43,9 +33,9 @@ export interface SnappingConfig {
 
 export interface SnappingContext {
   primitives: DrawingPrimitive[];
-  vertexConstraints: { x: number; y: number }[];
-  activeConstraint: { x: number; y: number; type: 'horizontal' | 'vertical' } | null;
-  currentStart: { x: number; y: number } | null;
+  vertexConstraints: Point[];
+  activeConstraint: { x: number; y: number; type: ConstraintType } | null;
+  currentStart: Point | null;
   shiftHeld: boolean;
   orthoTempDisabled: boolean;
   constraintTempDisabled: boolean;
@@ -56,14 +46,14 @@ export interface SnappingContext {
 
 export interface ISnappingService {
   findSnap(
-    screenPos: { x: number; y: number },
+    screenPos: Point,
     context: SnappingContext
   ): SnapResult;
   
   updateConfig(config: Partial<SnappingConfig>): void;
   getConfig(): SnappingConfig;
-  worldToScreen(worldPos: { x: number; y: number }, context: SnappingContext): { x: number; y: number };
-  screenToWorld(screenPos: { x: number; y: number }, context: SnappingContext): { x: number; y: number };
+  worldToScreen(worldPos: Point, context: SnappingContext): Point;
+  screenToWorld(screenPos: Point, context: SnappingContext): Point;
 }
 
 // ===== CONTEXT MANAGER =====

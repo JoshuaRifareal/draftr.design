@@ -2,6 +2,8 @@
 import { appStateStore, type AppState } from './AppStateStore';
 import type { DrawingPrimitive } from '../types/DraftrTypes';
 import { layerService } from './LayerService';
+import { getErrorMessage, safeSync } from '../utils/errorHandling';
+import type { Point, ConstraintType } from '../types/ToolTypes';
 
 // Add window type declaration at the top
 declare global {
@@ -14,179 +16,304 @@ declare global {
 // 🎯 ADAPTERS FOR EXISTING COMMANDS
 export const CommandAdapters = {
     
-  // 🎯 DRAWING COMMANDS
+  // 🎯 DRAWING COMMANDS with type-safe error handling
   drawLine: (primitive: DrawingPrimitive) => {
-    console.log('🎯 CommandAdapters.drawLine called', primitive.id);
-    
-    appStateStore.executeCommand('draw-line', (state: AppState) => {
-      // Assign to current layer
-      const layerId = primitive.layerId || layerService.getActiveLayerId();
-      const primitiveWithLayer = { ...primitive, layerId };
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.drawLine called', primitive.id);
       
-      console.log('➕ Adding primitive to layer:', layerId);
-      layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
-      
-      return {
-        ...state,
-        primitives: [...state.primitives, primitiveWithLayer],
-        currentStart: { x: primitive.data[2], y: primitive.data[3] }, // Continue from end point
-        previewEnd: null
-      };
+      if (!primitive.id) {
+        throw new Error('Primitive ID is required');
+      }
+
+      if (!primitive.data || primitive.data.length < 4) {
+        throw new Error('Invalid primitive data');
+      }
+
+      appStateStore.executeCommand('draw-line', (state: AppState) => {
+        // Assign to current layer
+        const layerId = primitive.layerId || layerService.getActiveLayerId();
+        const primitiveWithLayer = { ...primitive, layerId };
+        
+        console.log('➕ Adding primitive to layer:', layerId);
+        
+        // 🎯 Handle layer assignment errors gracefully
+        try {
+          layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
+        } catch (layerError) {
+          console.warn(`⚠️ Could not assign primitive to layer, continuing without layer:`, getErrorMessage(layerError));
+          // Continue with orphaned primitive rather than failing the entire operation
+        }
+        
+        return {
+          ...state,
+          primitives: [...state.primitives, primitiveWithLayer],
+          currentStart: { x: primitive.data[2], y: primitive.data[3] }, // Continue from end point
+          previewEnd: null
+        };
+      });
     });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.drawLine failed:', error);
+      throw new Error(error);
+    }
   },
+
   drawRectangle: (primitive: DrawingPrimitive) => {
-    console.log('🎯 CommandAdapters.drawRectangle called', primitive.id);
-    
-    appStateStore.executeCommand('draw-rectangle', (state: AppState) => {
-      const layerId = primitive.layerId || layerService.getActiveLayerId();
-      const primitiveWithLayer = { ...primitive, layerId };
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.drawRectangle called', primitive.id);
       
-      layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
-      
-      return {
-        ...state,
-        primitives: [...state.primitives, primitiveWithLayer],
-        currentStart: null,
-        previewEnd: null
-      };
+      appStateStore.executeCommand('draw-rectangle', (state: AppState) => {
+        const layerId = primitive.layerId || layerService.getActiveLayerId();
+        const primitiveWithLayer = { ...primitive, layerId };
+        
+        layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
+        
+        return {
+          ...state,
+          primitives: [...state.primitives, primitiveWithLayer],
+          currentStart: null,
+          previewEnd: null
+        };
+      });
     });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.drawRectangle failed:', error);
+      throw new Error(error);
+    }
   },
 
   // 🎯 CONSTRAINT COMMANDS (non-undoable)
-  setVertexConstraints: (constraints: {x: number, y: number}[]) => {
-    appStateStore.updateTemporaryState({ vertexConstraints: constraints });
-  },
-  addVertexConstraint: (vertex: {x: number, y: number}) => {
-    const currentState = appStateStore.getState();
-    const key = `${vertex.x.toFixed(4)},${vertex.y.toFixed(4)}`;
-    const exists = currentState.vertexConstraints.some(v => 
-      `${v.x.toFixed(4)},${v.y.toFixed(4)}` === key
-    );
-    
-    if (exists) {
-      // Remove if exists (toggle behavior)
-      appStateStore.updateTemporaryState({
-        vertexConstraints: currentState.vertexConstraints.filter(v => 
-          `${v.x.toFixed(4)},${v.y.toFixed(4)}` !== key
-        )
-      });
-    } else {
-      // Add if new
-      appStateStore.updateTemporaryState({
-        vertexConstraints: [...currentState.vertexConstraints, vertex]
-      });
+  setVertexConstraints: (constraints: Point[]) => {
+    const { error } = safeSync(() => {
+      appStateStore.updateTemporaryState({ vertexConstraints: constraints });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.setVertexConstraints failed:', error);
     }
   },
+
+  addVertexConstraint: (vertex: Point) => {
+    const { error } = safeSync(() => {
+      const currentState = appStateStore.getState();
+      const key = `${vertex.x.toFixed(4)},${vertex.y.toFixed(4)}`;
+      const exists = currentState.vertexConstraints.some(v => 
+        `${v.x.toFixed(4)},${v.y.toFixed(4)}` === key
+      );
+      
+      if (exists) {
+        // Remove if exists (toggle behavior)
+        appStateStore.updateTemporaryState({
+          vertexConstraints: currentState.vertexConstraints.filter(v => 
+            `${v.x.toFixed(4)},${v.y.toFixed(4)}` !== key
+          )
+        });
+      } else {
+        // Add if new
+        appStateStore.updateTemporaryState({
+          vertexConstraints: [...currentState.vertexConstraints, vertex]
+        });
+      }
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.addVertexConstraint failed:', error);
+    }
+  },
+
   clearVertexConstraints: () => {
-    appStateStore.updateTemporaryState({ vertexConstraints: [] });
-  },
-  setActiveConstraint: (constraint: {x: number, y: number, type: 'horizontal' | 'vertical'} | null) => {
-    appStateStore.updateTemporaryState({ activeConstraint: constraint });
+    const { error } = safeSync(() => {
+      appStateStore.updateTemporaryState({ vertexConstraints: [] });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.clearVertexConstraints failed:', error);
+    }
   },
 
-  // 🎯 TOOL COMMANDS
+  setActiveConstraint: (constraint: {x: number, y: number; type: ConstraintType} | null) => {
+    const { error } = safeSync(() => {
+      appStateStore.updateTemporaryState({ activeConstraint: constraint });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.setActiveConstraint failed:', error);
+    }
+  },
+
+  // 🎯 TOOL COMMANDS with type-safe error handling
   setActiveTool: (tool: string) => {
-    console.log('🎯 CommandAdapters.setActiveTool called', tool);
-    
-    appStateStore.executeCommand('set-tool', (state: AppState) => ({
-      ...state,
-      activeTool: tool,
-      currentStart: null,
-      previewEnd: null,
-      selectionStart: null,
-      selectionEnd: null
-    }));
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.setActiveTool called', tool);
+      
+      appStateStore.executeCommand('set-tool', (state: AppState) => ({
+        ...state,
+        activeTool: tool,
+        currentStart: null,
+        previewEnd: null,
+        selectionStart: null,
+        selectionEnd: null
+      }));
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.setActiveTool failed:', error);
+      throw new Error(error);
+    }
   },
 
-  // 🎯 SELECTION COMMANDS
+  // 🎯 SELECTION COMMANDS with type-safe error handling
   setSelection: (selectedIds: string[]) => {
-    console.log('🎯 CommandAdapters.setSelection called', selectedIds);
-    
-    appStateStore.executeCommand('set-selection', (state: AppState) => ({
-      ...state,
-      selectedPrimitiveIds: selectedIds
-    }));
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.setSelection called', selectedIds);
+      
+      appStateStore.executeCommand('set-selection', (state: AppState) => ({
+        ...state,
+        selectedPrimitiveIds: selectedIds
+      }));
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.setSelection failed:', error);
+      throw new Error(error);
+    }
   },
 
   // 🎯 NAVIGATION COMMANDS
   zoom: (newScale: number, newOffsetX: number, newOffsetY: number) => {
-    console.log('🎯 CommandAdapters.zoom called (debounced)', { newScale, newOffsetX, newOffsetY });
-    
-    // Use the debounced navigation command
-    (appStateStore as any).executeNavigationCommand('zoom', (state: AppState) => ({
-      ...state,
-      scale: newScale,
-      offsetX: newOffsetX,
-      offsetY: newOffsetY
-    }));
-  },
-  panImmediate: (newOffsetX: number, newOffsetY: number) => {
-    // This is temporary during panning - won't create undo points
-    appStateStore.updateTemporaryState({
-      offsetX: newOffsetX,
-      offsetY: newOffsetY
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.zoom called (debounced)', { newScale, newOffsetX, newOffsetY });
+      
+      // Use the debounced navigation command
+      (appStateStore as any).executeNavigationCommand('zoom', (state: AppState) => ({
+        ...state,
+        scale: newScale,
+        offsetX: newOffsetX,
+        offsetY: newOffsetY
+      }));
     });
-  },
-  panFinal: (newOffsetX: number, newOffsetY: number) => {
-    (appStateStore as any).executeNavigationCommand('pan', (state: AppState) => ({
-      ...state,
-      offsetX: newOffsetX,
-      offsetY: newOffsetY
-    }));
+
+    if (error) {
+      console.error('🚨 CommandAdapters.zoom failed:', error);
+    }
   },
 
-  // 🎯 EDIT COMMANDS
-  clearCanvas: () => {
-    console.log('🎯 CommandAdapters.clearCanvas called');
-    
-    appStateStore.executeCommand('clear-canvas', (state: AppState) => {
-      // Clear layer assignments
-      console.log('🗑️ Clearing primitives from layers');
-      state.primitives.forEach(primitive => {
-        layerService.assignPrimitiveToLayer(primitive.id, null);
+  panImmediate: (newOffsetX: number, newOffsetY: number) => {
+    const { error } = safeSync(() => {
+      // This is temporary during panning - won't create undo points
+      appStateStore.updateTemporaryState({
+        offsetX: newOffsetX,
+        offsetY: newOffsetY
       });
-      
-      return {
-        ...state,
-        primitives: [],
-        selectedPrimitiveIds: []
-      };
     });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.panImmediate failed:', error);
+    }
   },
-  deleteSelected: (selectedIds: string[]) => {
-    console.log('🎯 CommandAdapters.deleteSelected called', selectedIds);
-    
-    appStateStore.executeCommand('delete-selected', (state: AppState) => {
-      // Remove from layers
-      selectedIds.forEach(id => {
-        layerService.assignPrimitiveToLayer(id, null);
-      });
-      
-      const newPrimitives = state.primitives.filter(p => !selectedIds.includes(p.id));
-      console.log(`🗑️ Deleted ${selectedIds.length} primitives, ${newPrimitives.length} remaining`);
-      
-      return {
+
+  panFinal: (newOffsetX: number, newOffsetY: number) => {
+    const { error } = safeSync(() => {
+      (appStateStore as any).executeNavigationCommand('pan', (state: AppState) => ({
         ...state,
-        primitives: newPrimitives,
-        selectedPrimitiveIds: []
-      };
+        offsetX: newOffsetX,
+        offsetY: newOffsetY
+      }));
     });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.panFinal failed:', error);
+    }
+  },
+
+  // 🎯 EDIT COMMANDS with type-safe error handling
+  clearCanvas: () => {
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.clearCanvas called');
+      
+      appStateStore.executeCommand('clear-canvas', (state: AppState) => {
+        // Clear layer assignments
+        console.log('🗑️ Clearing primitives from layers');
+        state.primitives.forEach(primitive => {
+          layerService.assignPrimitiveToLayer(primitive.id, null);
+        });
+        
+        return {
+          ...state,
+          primitives: [],
+          selectedPrimitiveIds: []
+        };
+      });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.clearCanvas failed:', error);
+      throw new Error(error);
+    }
+  },
+
+  deleteSelected: (selectedIds: string[]) => {
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.deleteSelected called', selectedIds);
+      
+      appStateStore.executeCommand('delete-selected', (state: AppState) => {
+        // Remove from layers
+        selectedIds.forEach(id => {
+          layerService.assignPrimitiveToLayer(id, null);
+        });
+        
+        const newPrimitives = state.primitives.filter(p => !selectedIds.includes(p.id));
+        console.log(`🗑️ Deleted ${selectedIds.length} primitives, ${newPrimitives.length} remaining`);
+        
+        return {
+          ...state,
+          primitives: newPrimitives,
+          selectedPrimitiveIds: []
+        };
+      });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.deleteSelected failed:', error);
+      throw new Error(error);
+    }
   },
 
   // 🎯 UTILITY: Update preview (non-undoable)
-  updatePreview: (previewEnd: { x: number; y: number } | null) => {
-    appStateStore.updateTemporaryState({ previewEnd });
-  },
-  updateCurrentStart: (currentStart: { x: number; y: number } | null) => {
-    appStateStore.updateTemporaryState({ currentStart });
-  },
-  updateSelectionRect: (start: { x: number; y: number } | null, end: { x: number; y: number } | null) => {
-    appStateStore.updateTemporaryState({ 
-      selectionStart: start, 
-      selectionEnd: end 
+  updatePreview: (previewEnd: Point | null) => {
+    const { error } = safeSync(() => {
+      appStateStore.updateTemporaryState({ previewEnd });
     });
-  }
 
+    if (error) {
+      console.error('🚨 CommandAdapters.updatePreview failed:', error);
+    }
+  },
+
+  updateCurrentStart: (currentStart: Point | null) => {
+    const { error } = safeSync(() => {
+      appStateStore.updateTemporaryState({ currentStart });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.updateCurrentStart failed:', error);
+    }
+  },
+
+  updateSelectionRect: (start: Point | null, end: Point | null) => {
+    const { error } = safeSync(() => {
+      appStateStore.updateTemporaryState({ 
+        selectionStart: start, 
+        selectionEnd: end 
+      });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.updateSelectionRect failed:', error);
+    }
+  }
 };
 
 // 🎯 Export for browser testing

@@ -1,5 +1,6 @@
 // services/AppStateStore.ts
 import type { DrawingPrimitive } from '../types/DraftrTypes';
+import type { Point, ConstraintType } from '../types/ToolTypes';
 
 declare global {
     interface Window {
@@ -18,12 +19,12 @@ export interface AppState {
   offsetY: number;
   activeTool: string;
   // Undoable states
-  selectionStart: { x: number; y: number } | null;
-  selectionEnd: { x: number; y: number } | null;
-  currentStart: { x: number; y: number } | null;
-  previewEnd: { x: number; y: number } | null;
-  vertexConstraints: {x: number, y: number}[];
-  activeConstraint: {x: number, y: number, type: 'horizontal' | 'vertical'} | null;
+  selectionStart: Point | null;
+  selectionEnd: Point | null;
+  currentStart: Point | null;
+  previewEnd: Point | null;
+  vertexConstraints: Point[];
+  activeConstraint: {x: number, y: number; type: ConstraintType} | null;
 }
 
 export interface CommandHistoryItem {
@@ -44,6 +45,10 @@ export class AppStateStore {
   private navigationDebounceTimer: number | null = null;
   private readonly NAVIGATION_DEBOUNCE_MS = 500;
 
+  // 🎯 Memory management improvements
+  private readonly MEMORY_LIMIT_MB = 50; // Limit total undo history memory
+  private readonly STATE_SIZE_SAMPLE_COUNT = 10;
+  private stateSizeSamples: number[] = [];
 
   constructor(initialState: AppState) {
     this.currentState = initialState;
@@ -59,7 +64,23 @@ export class AppStateStore {
       return;
     }
 
-    // For regular commands, capture state immediately
+    // 🎯 Memory management: Estimate current state size
+    const stateSize = this.estimateStateSize(this.currentState);
+    this.stateSizeSamples.push(stateSize);
+    
+    // Keep only recent samples
+    if (this.stateSizeSamples.length > this.STATE_SIZE_SAMPLE_COUNT) {
+      this.stateSizeSamples.shift();
+    }
+
+    // 🎯 Check memory limit and trim history if needed
+    if (this.isMemoryLimitReached() && this.history.length > 10) {
+      console.warn('🧠 Memory limit approaching, trimming undo history');
+      // Remove oldest 25% of history
+      const trimCount = Math.floor(this.history.length * 0.25);
+      this.history.splice(0, trimCount);
+    }
+
     const stateForUndo = this.getUndoableState(this.currentState);
     
     this.history.push({
@@ -83,9 +104,11 @@ export class AppStateStore {
     console.log(`✅ Command executed: ${commandName}`, {
       history: this.history.length,
       future: this.future.length,
-      primitives: newState.primitives.length
+      primitives: newState.primitives.length,
+      estimatedMemoryMB: ((this.history.length * this.getAverageStateSize()) / (1024 * 1024)).toFixed(2)
     });
   }
+
   private isNavigationCommand(commandName: string): boolean {
     const navigationCommands = ['zoom', 'pan', 'zoom-in', 'zoom-out', 'reset-zoom'];
     return navigationCommands.some(cmd => commandName.includes(cmd));
@@ -138,6 +161,29 @@ export class AppStateStore {
     }, this.NAVIGATION_DEBOUNCE_MS);
   }
 
+  // 🎯 Memory management methods
+  private estimateStateSize(state: AppState): number {
+    // Rough estimation of state size in bytes
+    try {
+      const jsonString = JSON.stringify(state);
+      return new Blob([jsonString]).size;
+    } catch (error) {
+      console.warn('Failed to estimate state size, using default');
+      return 1024; // Default 1KB
+    }
+  }
+
+  private getAverageStateSize(): number {
+    if (this.stateSizeSamples.length === 0) return 1024; // Default 1KB
+    return this.stateSizeSamples.reduce((a, b) => a + b, 0) / this.stateSizeSamples.length;
+  }
+
+  private isMemoryLimitReached(): boolean {
+    const avgStateSize = this.getAverageStateSize();
+    const estimatedMemoryMB = (this.history.length * avgStateSize) / (1024 * 1024);
+    return estimatedMemoryMB > this.MEMORY_LIMIT_MB;
+  }
+
   // Get only undoable state (exclude temporary visual states)
   private getUndoableState(state: AppState): AppState {
     return {
@@ -159,6 +205,7 @@ export class AppStateStore {
       activeConstraint: null
     };
   }
+
   // Update temporary states without affecting undo history
   updateTemporaryState(updates: Partial<AppState>): void {
     this.currentState = { ...this.currentState, ...updates };
@@ -184,6 +231,7 @@ export class AppStateStore {
 
     this.setState(previous.state);
   }
+
   redo(): void {
     if (this.future.length === 0) {
       console.log('⏩ Nothing to redo');
@@ -208,10 +256,12 @@ export class AppStateStore {
   getState(): AppState {
     return this.currentState;
   }
+
   setState(newState: AppState): void {
     this.currentState = newState;
     this.notifyListeners();
   }
+
   updateState(updates: Partial<AppState>): void {
     this.currentState = { ...this.currentState, ...updates };
     this.notifyListeners();
@@ -229,12 +279,22 @@ export class AppStateStore {
 
   // 🎯 DEBUG UTILITIES
   getDebugInfo() {
+    const avgStateSize = this.getAverageStateSize();
+    const estimatedMemoryMB = (this.history.length * avgStateSize) / (1024 * 1024);
+    
     return {
       currentState: {
         primitives: this.currentState.primitives.length,
         selectedIds: this.currentState.selectedPrimitiveIds.length,
         scale: this.currentState.scale,
         activeTool: this.currentState.activeTool
+      },
+      memory: {
+        estimatedMB: estimatedMemoryMB.toFixed(2),
+        historyItems: this.history.length,
+        averageStateSizeKB: (avgStateSize / 1024).toFixed(2),
+        memoryLimitMB: this.MEMORY_LIMIT_MB,
+        stateSizeSamples: this.stateSizeSamples.length
       },
       history: this.history.map((item, index) => ({
         index,
@@ -245,16 +305,35 @@ export class AppStateStore {
       future: this.future.length
     };
   }
+
   canUndo(): boolean {
     return this.history.length > 0;
   }
+
   canRedo(): boolean {
     return this.future.length > 0;
   }
+
   clearHistory(): void {
     this.history = [];
     this.future = [];
+    this.stateSizeSamples = [];
     console.log('📚 History cleared');
+  }
+
+  // 🎯 Memory management public API
+  getMemoryInfo() {
+    const avgStateSize = this.getAverageStateSize();
+    const estimatedMemoryMB = (this.history.length * avgStateSize) / (1024 * 1024);
+    
+    return {
+      estimatedMB: estimatedMemoryMB.toFixed(2),
+      historyItems: this.history.length,
+      averageStateSizeKB: (avgStateSize / 1024).toFixed(2),
+      memoryLimitMB: this.MEMORY_LIMIT_MB,
+      stateSizeSamples: this.stateSizeSamples.length,
+      isOverLimit: this.isMemoryLimitReached()
+    };
   }
 }
 
@@ -316,7 +395,7 @@ if (typeof window !== 'undefined') {
           id: 'test-line-1',
           type: 'line',
           data: [0, 0, 100, 100, 1, 1, 1, 1],
-          layerId: 'default'
+          layerId: null
         }]
       }));
       
@@ -331,6 +410,10 @@ if (typeof window !== 'undefined') {
       console.log('📋 Test 4: Redo');
       store.redo();
       console.log('After redo - Primitives:', store.getState().primitives.length);
+      
+      // Test 5: Memory info
+      console.log('📋 Test 5: Memory info');
+      console.log('Memory Info:', store.getMemoryInfo());
       
       console.log('🎉 ALL TESTS PASSED!');
       return true;

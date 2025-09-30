@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
 import { snappingService, contextManager } from './services/SnappingService';
-import type { SnapResult, SnapType } from './services/SnappingService';
+import type { SnapResult } from './services/SnappingService';
+import type { SnapType } from './types/ToolTypes.js';
 import { ThemeManager, type Theme } from './services/ThemeManager';
 import { selectionService } from './services/SelectionService';
 import { layerService } from './services/LayerService';
@@ -12,6 +13,10 @@ import { CommandAdapters } from './services/CommandAdapters';
 import type { DrawingPrimitive } from './types/DraftrTypes';
 import { useCursor } from './components/Cursors/useCursor';
 import { CURSORS  } from './components/Cursors/cursors';
+import { ErrorBoundary, SimpleErrorFallback } from './components/ErrorBoundary';
+import { PerformanceMonitor, type PerformanceMetrics, debounce, throttle } from './utils/performance';
+import { getErrorMessage } from './utils/errorHandling';
+import { isValidToolType } from './types/ToolTypes';
 
 
 // Default Variables
@@ -34,8 +39,6 @@ const App: React.FC = () => {
   const serviceRef = useRef<RenderService | null>(null);
   const [debug, setDebug] = useState(true);
 
-
-
   // Selection service setup
   const [shiftHeldForSelection, setShiftHeldForSelection] = useState(false);
 
@@ -44,9 +47,6 @@ const App: React.FC = () => {
   const [currentTheme, setCurrentTheme] = useState<Theme>('dark');
   const [lineColor, setLineColor] = useState({ r: 1.0, g: 1.0, b: 1.0, a: 1.0 });
   const [snapColor, setSnapColor] = useState({ r: 1.0, g: 0.8, b: 0.0, a: 1.0 });
-
-  // Tool types
-  type ToolType = 'SELECTION' | 'LINE' | 'RECTANGLE' | 'CIRCLE';
 
   // Pan/zoom state
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
@@ -141,6 +141,79 @@ const App: React.FC = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const cursor = useCursor(activeTool, shiftHeld, isDrawing, !!panStart, currentTheme);
   const [globalCursor, setGlobalCursor] = useState<string>(CURSORS.DEFAULT(currentTheme));
+
+  // 🎯 PERFORMANCE: Add performance monitor
+  const performanceMonitor = useRef(new PerformanceMonitor()).current;
+
+  // 🎯 PERFORMANCE: Memoize static configs that never change
+  const orthoConfigMemo = useMemo(() => ({
+    color: ORTHO_COLOR,
+    dashPx: ORTHO_DASH_PX,
+    gapPx: ORTHO_GAP_PX,
+    thicknessPx: ORTHO_THICKNESS_PX,
+    thresholdDeg: ORTHO_THRESHOLD_DEG,
+    anglesDeg: ORTHO_ANGLES_DEG,
+  }), []);
+
+  const gridConfigMemo = useMemo(() => ({
+    color: GRID_COLOR,
+    spacingMin: GRID_SPACING_MIN_PX,
+    spacingMax: GRID_SPACING_MAX_PX
+  }), []);
+
+  // 🎯 PERFORMANCE: Optimize redrawAll with useCallback
+  const redrawAll = useCallback((preview: { x: number; y: number } | null, snapResult: SnapResult) => {
+    const startTime = performanceMonitor.startMeasurement('redrawAll');
+    
+    if (!serviceRef.current || !canvasRef.current) return;
+    const service = serviceRef.current;
+    
+    // Layer-aware redraw method
+    service.redrawAll(preview, snapResult, {
+      offsetX, offsetY, scale,
+      activeTool, 
+      activeConstraint,
+      constraintColor,
+      currentStart, 
+      orthoConfig: orthoConfigMemo,
+      vertexConstraints,
+      selectedPrimitiveIds, 
+      selectionStart, 
+      selectionEnd,
+      lineColor, 
+      snapColor,
+      orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
+      orthoAnglesDeg: ORTHO_ANGLES_DEG
+    });
+    
+    const duration = performanceMonitor.endMeasurement('redrawAll', startTime);
+    performanceMonitor.recordRedraw(duration);
+  }, [
+    offsetX, offsetY, scale,
+    activeTool,
+    activeConstraint,
+    currentStart,
+    selectedPrimitiveIds,
+    selectionStart,
+    selectionEnd,
+    orthoConfigMemo,
+  ]);
+
+  // 🎯 PERFORMANCE: Debounced redraw for high-frequency operations
+  const debouncedRedraw = useCallback(
+    debounce((preview: { x: number; y: number } | null, snapResult: SnapResult) => {
+      redrawAll(preview, snapResult);
+    }, 16),
+    [redrawAll]
+  );
+
+  // 🎯 PERFORMANCE: Add performance state and overlay
+  const [showPerformance, setShowPerformance] = useState(false);
+  const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
+
+  // Error state
+  const [error, setError] = useState<string | null>(null);
+
   useEffect(() => {
     const activeLayer = layerService.getActiveLayer();
     const isLayerLocked = activeLayer?.properties.locked ?? false;
@@ -160,7 +233,106 @@ const App: React.FC = () => {
     setGlobalCursor(newCursor);
   }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
 
+  // Update performance metrics periodically when overlay is shown
+  useEffect(() => {
+    if (!showPerformance) return;
+    
+    const interval = setInterval(() => {
+      setPerformanceMetrics(performanceMonitor.getMetrics());
+    }, 1000);
+    
+    return () => clearInterval(interval);
+  }, [showPerformance, performanceMonitor]);
 
+  // 🎯 PERFORMANCE: Monitor frame rate
+  useEffect(() => {
+    const updateMetrics = () => {
+      performanceMonitor.updateFrameRate();
+    };
+    
+    const interval = setInterval(updateMetrics, 1000);
+    return () => clearInterval(interval);
+  }, [performanceMonitor]);
+
+  // Error display component
+  const ErrorDisplay: React.FC<{ error: string | null; onDismiss: () => void }> = ({ error, onDismiss }) => {
+    if (!error) return null;
+
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        padding: '16px',
+        backgroundColor: '#fed7d7',
+        border: '1px solid #feb2b2',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        zIndex: 10001,
+        maxWidth: '400px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+          <div style={{ flex: 1 }}>
+            <strong>⚠️ Error</strong>
+            <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>{error}</p>
+          </div>
+          <button 
+            onClick={onDismiss}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '18px',
+              cursor: 'pointer',
+              color: '#c53030'
+            }}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // 🎯 PERFORMANCE: Performance overlay component
+  const PerformanceOverlay: React.FC<{ metrics: PerformanceMetrics | null }> = ({ metrics }) => {
+    if (!metrics || !showPerformance) return null;
+    
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '100px',
+        right: '20px',
+        padding: '12px',
+        backgroundColor: 'rgba(0, 0, 0, 0.8)',
+        color: 'white',
+        borderRadius: '8px',
+        fontSize: '12px',
+        fontFamily: 'monospace',
+        zIndex: 10000,
+        minWidth: '200px',
+        backdropFilter: 'blur(10px)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <strong>Performance</strong>
+          <button 
+            onClick={() => setShowPerformance(false)}
+            style={{ background: 'none', border: 'none', color: 'white', cursor: 'pointer', fontSize: '16px' }}
+          >
+            ×
+          </button>
+        </div>
+        <div>FPS: <span style={{ color: metrics.frameRate > 50 ? '#4ade80' : metrics.frameRate > 30 ? '#fbbf24' : '#ef4444' }}>
+          {metrics.frameRate}
+        </span></div>
+        <div>Redraws: {metrics.redrawCount}</div>
+        <div>Avg Redraw: {metrics.averageRedrawTime.toFixed(2)}ms</div>
+        <div>Last Redraw: {metrics.lastRedrawTime.toFixed(2)}ms</div>
+        {metrics.memoryUsage && (
+          <div>Memory: {metrics.memoryUsage.toFixed(2)}MB</div>
+        )}
+      </div>
+    );
+  };
 
   ////////// INITIALIZATION \\\\\\\\\\
   useEffect(() => {
@@ -174,10 +346,10 @@ const App: React.FC = () => {
         service.setTransform(offsetX, offsetY, scale);
   
         // Set orthogonal defaults
-        service.setOrthoConfig(orthoConfig);
+        service.setOrthoConfig(orthoConfigMemo);
         
         // Set grid defaults  
-        service.setGridConfig(gridConfig);
+        service.setGridConfig(gridConfigMemo);
 
         // Set canvas and selection color
         service.setCanvasColor(
@@ -216,6 +388,79 @@ const App: React.FC = () => {
       (window as any).appStateStore = appStateStore;
       (window as any).CommandAdapters = CommandAdapters;
       (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
+      
+      // 🎯 PERFORMANCE: Add performance testing
+      (window as any).testPerformance = () => {
+        console.log('🧪 Testing Performance...');
+        
+        // Test 1: Measure redraw performance
+        console.log('📋 Test 1: Redraw performance');
+        const metrics = performanceMonitor.getMetrics();
+        console.log('Current Performance Metrics:', metrics);
+        
+        // Test 2: Create many primitives to test scaling
+        console.log('📋 Test 2: Scaling test (creating 100 primitives)');
+        const startTime = performance.now();
+        
+        for (let i = 0; i < 100; i++) {
+          const testPrimitive: DrawingPrimitive = {
+            id: `perf-test-${i}`,
+            type: 'line',
+            data: [i * 10, i * 10, i * 10 + 50, i * 10 + 50, 1, 1, 1, 1],
+            layerId: null
+          };
+          CommandAdapters.drawLine(testPrimitive);
+        }
+        
+        const endTime = performance.now();
+        console.log(`Created 100 primitives in ${(endTime - startTime).toFixed(2)}ms`);
+        
+        // Test 3: Selection performance
+        console.log('📋 Test 3: Selection performance');
+        const selectionStart = performance.now();
+        selectionService.selectByRectangle(
+          { x: 0, y: 0 },
+          { x: 1000, y: 1000 }
+        );
+        const selectionEnd = performance.now();
+        console.log(`Rectangle selection took ${(selectionEnd - selectionStart).toFixed(2)}ms`);
+        
+        // Test 4: Memory usage
+        console.log('📋 Test 4: Memory usage');
+        console.log('Performance Metrics:', performanceMonitor.getMetrics());
+        
+        return true;
+      };
+      
+      (window as any).getPerformanceMetrics = () => performanceMonitor.getMetrics();
+      (window as any).resetPerformanceMetrics = () => performanceMonitor.reset();
+      (window as any).togglePerformanceOverlay = () => setShowPerformance(prev => !prev);
+
+      // Error testing
+      (window as any).testErrorHandling = () => {
+        console.log('🧪 Testing Error Handling...');
+        
+        try {
+          // Test 1: Invalid layer assignment
+          console.log('📋 Test 1: Invalid layer assignment');
+          layerService.assignPrimitiveToLayer('test-primitive', 'non-existent-layer');
+        } catch (error) {
+          console.log('✅ Expected error caught:', getErrorMessage(error));
+        }
+        
+        // Test 2: Invalid primitive registration
+        console.log('📋 Test 2: Invalid primitive registration');
+        try {
+          selectionService.registerPrimitiveWithId('', 'line', []);
+        } catch (error) {
+          console.log('✅ Expected error caught:', getErrorMessage(error));
+        }
+        
+        // Test 3: Test error boundary
+        console.log('📋 Test 3: Testing error boundary (check console for boundary catch)');
+        
+        return true;
+      };
     }
   }, [serviceRef.current]);
 
@@ -286,7 +531,7 @@ const App: React.FC = () => {
       const h = window.innerHeight;
       setCanvasSize({ w, h });
       if (canvasRef.current) {
-        canvasRef.current.width = w * window.devicePixelRatio; // ✅ Handle high-DPI
+        canvasRef.current.width = w * window.devicePixelRatio;
         canvasRef.current.height = h * window.devicePixelRatio;
         canvasRef.current.style.width = w + 'px';
         canvasRef.current.style.height = h + 'px';
@@ -296,15 +541,38 @@ const App: React.FC = () => {
         redrawAll(previewEnd, snapResult);
       }
     };
+
     window.addEventListener("resize", handleResize);
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
   }, [primitives, scale, offsetX, offsetY, previewEnd, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
 
+  // Global error handlers
+  useEffect(() => {
+    const handleGlobalError = (event: ErrorEvent) => {
+      console.error('🚨 Global error caught:', event.error);
+      setError(getErrorMessage(event.error));
+    };
+
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      console.error('🚨 Unhandled promise rejection:', event.reason);
+      setError(getErrorMessage(event.reason));
+      event.preventDefault();
+    };
+
+    window.addEventListener('error', handleGlobalError);
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+
+    return () => {
+      window.removeEventListener('error', handleGlobalError);
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
+  }, []);
+
   // Keyboard listeners
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "Escape") {
+      if (e.key === "F8" || e.key === "F9" || e.key === "F10" || e.key === "Escape" || e.key === "F11") {
         e.preventDefault();
       }
 
@@ -338,6 +606,11 @@ const App: React.FC = () => {
         handleThemeToggle();
         return; 
       }
+      if (e.key === "F11") {
+        e.preventDefault();
+        setShowPerformance(prev => !prev);
+        console.log('📊 Performance overlay toggled');
+      }
       if (e.key === "Escape") {
         CommandAdapters.setSelection([]);
         CommandAdapters.setActiveTool('SELECTION');
@@ -347,16 +620,16 @@ const App: React.FC = () => {
         if (e.key === "z" || e.key === "Z") {
           e.preventDefault();
           if (e.shiftKey) {
-            appStateStore.redo(); // Ctrl+Shift+Z for redo
+            appStateStore.redo();
             console.log("🔁 Redo triggered");
           } else {
-            appStateStore.undo(); // Ctrl+Z for undo
+            appStateStore.undo();
             console.log("⏪ Undo triggered");
           }
         }
         if (e.key === "y" || e.key === "Y") {
           e.preventDefault();
-          appStateStore.redo(); // Ctrl+Y for redo
+          appStateStore.redo();
           console.log("🔁 Redo triggered");
         }
       }
@@ -587,38 +860,103 @@ const App: React.FC = () => {
 
   // Check if orthogonal snapping should be active
   const shouldUseOrthoSnapping = () => {
-    // Hard override with Shift key (temporary orthogonal snapping)
     if (shiftHeld) return true;
-    
-    // Normal orthogonal snapping (if enabled and not temporarily disabled due to vertex priority)
     return orthoSnapEnabled && !orthoTempDisabled;
   };
 
-  // Redraw call from renderservice
-  const redrawAll = (preview: { x: number; y: number } | null, snapResult: SnapResult) => {
-    if (!serviceRef.current || !canvasRef.current) return;
-    const service = serviceRef.current;
-    
-    // Layer-aware redraw method
-    service.redrawAll(preview, snapResult, {
-      offsetX, offsetY, scale,
-      activeTool, 
-      activeConstraint,
-      constraintColor,
-      currentStart, 
-      orthoConfig, 
-      vertexConstraints,
-      selectedPrimitiveIds, 
-      selectionStart, 
-      selectionEnd,
-      lineColor, 
-      snapColor,
-      orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
-      orthoAnglesDeg: ORTHO_ANGLES_DEG
-    });
-  };
+  // 🎯 PERFORMANCE: Throttled mouse move handler
+  const handleMouseMove = useCallback(
+    throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
+      const pos = getMousePos(evt);
+      const snapResult = findSnap(pos);
+      const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
+      const cursorWorld = constraintSnap ?? 
+                         (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
+      let preview = cursorWorld;
 
-  ////////// INTERACTION \\\\\\\\\\
+      // Panning functionality
+      if (panStart) {
+        const dx = (pos.x - panStart.x) / scale;
+        const dy = (pos.y - panStart.y) / scale;
+        
+        CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
+        
+        setIsDrawing(false);
+        setPanStart({ x: pos.x, y: pos.y });
+        debouncedRedraw(previewEnd, snapResult);
+        return;
+      }
+
+      // Selection rectangle
+      if (activeTool === 'SELECTION' && selectionStart) {
+        const cursorWorld = screenToWorld(pos.x, pos.y);
+        CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
+        debouncedRedraw(previewEnd, snapResult);
+        return;
+      }
+
+      // Check for vertex hover to toggle constraints
+      if (snapResult.type === 'vertex' && snapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+        const vertex = snapResult.metadata.vertex;
+        const key = getVertexKey(vertex);
+        if (!hoveredVerticesRef.current.has(key)) {
+          hoveredVerticesRef.current.add(key);
+          toggleVertexConstraint(vertex);
+        }
+      } else {
+        hoveredVerticesRef.current.clear();
+      }
+
+      if (!currentStart) return;
+
+      // Line preview logic
+      if (activeTool === 'LINE') {
+        if (hysteresisActive && currentSnap?.type === 'vertex') {
+          preview = currentSnap.position;
+        } else if (snapResult.type === 'vertex' || snapResult.type === 'intersection') {
+          if (snapResult.type === 'intersection' && snapResult.strength > 0.1) {
+            preview = snapResult.position;
+          } else if (snapResult.type === 'vertex') {
+            preview = snapResult.position;
+          }
+        } else if (shiftHeld) {
+          const dx = cursorWorld.x - currentStart.x;
+          const dy = cursorWorld.y - currentStart.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
+          const rad = (nearest.angle * Math.PI) / 180;
+          preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
+        } else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
+          const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+          if (constrained) {
+            preview = { x: constrained.x, y: constrained.y };
+          }
+        } else {
+          preview = snapResult.position;
+        }
+
+        CommandAdapters.updatePreview(preview);
+        debouncedRedraw(preview, snapResult);
+        return;
+      }
+
+      // Rectangle preview
+      if (activeTool === 'RECTANGLE' && currentStart) {
+        CommandAdapters.updatePreview(cursorWorld);
+        debouncedRedraw(cursorWorld, snapResult);
+        return;
+      }
+
+      CommandAdapters.updatePreview(preview);
+      debouncedRedraw(preview, snapResult);
+    }, 32),
+    [
+      panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
+      findSnap, screenToWorld, snappingService, debouncedRedraw, previewEnd,
+      hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled, orthoTempDisabled
+    ]
+  );
+
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
 
@@ -648,32 +986,28 @@ const App: React.FC = () => {
         const worldPos = screenToWorld(pos.x, pos.y);
         
         if (!selectionStart) {
-          // First click - start selection rectangle
           CommandAdapters.updateSelectionRect(worldPos, worldPos);
           setShiftHeldForSelection(shiftHeld);
         } else {
-          // Second click - finalize selection
           const result = selectionService.selectByRectangle(
             selectionStart, 
             worldPos, 
-            [] // Start with empty selection for new rectangle
+            []
           );
       
           let newSelection: string[];
           
           if (shiftHeldForSelection) {
-            // SHIFT HELD: Subtract from current selection
             newSelection = selectedPrimitiveIds.filter(id => !result.selectedIds.includes(id));
             console.log(`🗑️ Subtracting ${result.selectedIds.length} from selection`);
           } else {
-            // NO SHIFT: Add to current selection (always additive)
             const combined = new Set([...selectedPrimitiveIds, ...result.selectedIds]);
             newSelection = Array.from(combined);
             console.log(`➕ Adding ${result.selectedIds.length} to selection`);
           }
       
           CommandAdapters.setSelection(newSelection);
-          CommandAdapters.updateSelectionRect(null, null); // Reset selection rectangle
+          CommandAdapters.updateSelectionRect(null, null);
         }
         return;
       }
@@ -683,11 +1017,9 @@ const App: React.FC = () => {
         const cursorWorld = snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y);
 
         if (!currentStart) {
-          // First corner
           CommandAdapters.updateCurrentStart(cursorWorld);
           CommandAdapters.updatePreview(cursorWorld);
         } else {
-          // Finalize rectangle
           const newPrimitive: DrawingPrimitive = {
             id: `primitive-${crypto.randomUUID()}`,
             type: 'rectangle',
@@ -710,12 +1042,9 @@ const App: React.FC = () => {
           return; 
         }
 
-        // Draw Preview Line
         if (previewEnd) {
-          // Use previewEnd if available
           finalPos = previewEnd;
         } else if (shiftHeld && previewEnd) {
-          // Endpoint is constrained to lie along the guideline
           finalPos = previewEnd;
         } else if (!shiftHeld && currentStart && shouldUseOrthoSnapping()) {
           const cursorWorld = screenToWorld(pos.x, pos.y);
@@ -725,7 +1054,6 @@ const App: React.FC = () => {
           }
         }
 
-        // Draw Line
         if (!currentStart) {
           CommandAdapters.updateCurrentStart(finalPos);
         } else {
@@ -741,7 +1069,6 @@ const App: React.FC = () => {
           CommandAdapters.updateCurrentStart(finalPos);
           CommandAdapters.updatePreview(null);
 
-          // Clear constraints when finalizing an endpoint
           CommandAdapters.clearVertexConstraints();
           CommandAdapters.setActiveConstraint(null);
           hoveredVerticesRef.current.clear();
@@ -753,107 +1080,6 @@ const App: React.FC = () => {
       setPanStart({ x: pos.x, y: pos.y });
       setIsDrawing(false);
     }
-  };
-
-  const handleMouseMove = (evt: React.MouseEvent<HTMLCanvasElement>) => {
-    const pos = getMousePos(evt);
-    const snapResult = findSnap(pos);
-    const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
-    const cursorWorld = constraintSnap ?? 
-                       (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
-    let preview = cursorWorld;
-
-    // Panning functionality
-    if (panStart) {
-      const dx = (pos.x - panStart.x) / scale;
-      const dy = (pos.y - panStart.y) / scale;
-      
-      // Use immediate pan for smooth interaction
-      CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
-      
-      setIsDrawing(false);
-      setPanStart({ x: pos.x, y: pos.y });
-      redrawAll(previewEnd, snapResult);
-      return;
-    }
-
-    // Selection rectangle
-    if (activeTool === 'SELECTION' && selectionStart) {
-      const cursorWorld = screenToWorld(pos.x, pos.y);
-      CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
-      redrawAll(previewEnd, snapResult);
-      return;
-    }
-
-    // Check for vertex hover to toggle constraints
-    if (snapResult.type === 'vertex' && snapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
-      const vertex = snapResult.metadata.vertex;
-      const key = getVertexKey(vertex);
-      if (!hoveredVerticesRef.current.has(key)) {
-        hoveredVerticesRef.current.add(key);
-        toggleVertexConstraint(vertex);
-      }
-    } else {
-      hoveredVerticesRef.current.clear();
-    }
-
-    if (!currentStart) return;
-
-    // Line preview logic
-    if (activeTool === 'LINE') {
-      // 1. ABSOLUTE HIGHEST PRIORITY: Hysteresis override
-      if (hysteresisActive && currentSnap?.type === 'vertex') {
-        preview = currentSnap.position;
-      } 
-      // 2. HIGH PRIORITY: Vertex or intersection snaps (when not in hysteresis)
-      else if (snapResult.type === 'vertex' || snapResult.type === 'intersection') {
-        if (snapResult.type === 'intersection' && snapResult.strength > 0.1) {
-          preview = snapResult.position;
-        } else if (snapResult.type === 'vertex') {
-          preview = snapResult.position;
-        }
-      } 
-      // 3. MEDIUM PRIORITY: Shift-held ortho snapping (user override)
-      else if (shiftHeld) {
-        // Hard snapping override with Shift key
-        const dx = cursorWorld.x - currentStart.x;
-        const dy = cursorWorld.y - currentStart.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
-        const rad = (nearest.angle * Math.PI) / 180;
-        preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
-      } 
-      // 4. LOW PRIORITY: Normal ortho snapping (if enabled and not temporarily disabled)
-      else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
-        const constrained = applyOrthoConstraint(currentStart, cursorWorld);
-        if (constrained) {
-          preview = { x: constrained.x, y: constrained.y };
-        }
-      }
-      // 5. FALLBACK: Use whatever snap result we have
-      else {
-        preview = snapResult.position;
-      }
-
-      CommandAdapters.updatePreview(preview);
-      redrawAll(preview, snapResult);
-      return;
-    }
-
-    // Rectangle preview
-    if (activeTool === 'RECTANGLE' && currentStart) {
-      CommandAdapters.updatePreview(cursorWorld);
-      redrawAll(cursorWorld, snapResult);
-      return;
-    }
-
-    // Render ortho guidelines
-    if (serviceRef.current) {
-      serviceRef.current.setOrthoConfig(orthoConfig);
-    }
-
-    CommandAdapters.updatePreview(preview);
-    redrawAll(preview, snapResult);
   };
 
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
@@ -876,7 +1102,11 @@ const App: React.FC = () => {
     resetTool();
   };
 
-  const handleToolChange = (tool: ToolType) => {
+  const handleToolChange = (tool: string) => {
+    if (!isValidToolType(tool)) {
+      console.warn('⚠️ Invalid tool type:', tool);
+      return;
+    }
     CommandAdapters.setActiveTool(tool);
     CommandAdapters.setSelection([]);
     resetTool();
@@ -895,7 +1125,6 @@ const App: React.FC = () => {
     setCurrentSnap(null);
     hoveredVerticesRef.current.clear();
 
-    // Reset temporary ortho disable state when exiting line mode
     if (orthoTempDisabled) {
       setOrthoTempDisabled(false);
     }
@@ -910,11 +1139,9 @@ const App: React.FC = () => {
   
     const currentColors = themeManager.getCurrentColors();
 
-    // 🎯 Update root element class for CSS theming
     document.body.classList.remove('theme-dark', 'theme-light');
     document.body.classList.add(`theme-${newTheme}`);
 
-    // Update render service immediately
     if (serviceRef.current) {
       serviceRef.current.setGridConfig({
         ...gridConfig,
@@ -940,7 +1167,6 @@ const App: React.FC = () => {
       serviceRef.current.setSelectionHandleColor(currentColors.selectionHandleColor);
     }
 
-    // 🎯 Immediately update cursor on canvas element
     if (canvasRef.current) {
       const activeLayer = layerService.getActiveLayer();
       const isLayerLocked = activeLayer?.properties.locked ?? false;
@@ -961,7 +1187,6 @@ const App: React.FC = () => {
       canvasRef.current.style.cursor = newCursor;
     }
 
-    // Update all rendering colors from theme
     setConstraintColor(currentColors.constraintColor);
     setOrthoConfig(prev => ({ ...prev, color: currentColors.orthoColor }));
     setGridConfig(prev => ({ ...prev, color: currentColors.gridColor }));
@@ -972,45 +1197,46 @@ const App: React.FC = () => {
     setSelectionHighlightColor(currentColors.selectionHighlightColor);
     setSelectionHandleColor(currentColors.selectionHandleColor);
     
-    // Immediate redraw
     redrawAll(previewEnd, snapResult);
   };
 
   ////////// INTERFACE \\\\\\\\\\
   return (
-    <div style={{ position: "relative",
-        width: "100vw", height: "100vh",
-        cursor: globalCursor }}>
+    <ErrorBoundary fallback={SimpleErrorFallback}>
+      <div style={{ position: "relative", width: "100vw", height: "100vh", cursor: globalCursor }}>
+        <ErrorDisplay error={error} onDismiss={() => setError(null)} />
+        <PerformanceOverlay metrics={performanceMetrics} />
 
-      <canvas
-        ref={canvasRef}
-        width={canvasSize.w}
-        height={canvasSize.h}
-        style={{border: "none", display: "block",
-                 width: "100vw", height: "100vh", 
-                 cursor: cursor}}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onContextMenu={handleContextMenu}
-        tabIndex={0}
-      />
-      <UIOverlay
-        key={currentTheme}
-        scale={scale}
-        debug={debug}
-        setDebug={setDebug}
-        handleClear={handleClear}
-        orthoSnapEnabled={orthoSnapEnabled}
-        setOrthoSnapEnabled={setOrthoSnapEnabled}
-        shiftHeld={shiftHeld}
-        orthoTempDisabled={orthoTempDisabled}
-        activeTool={activeTool}
-        onToolChange={handleToolChange as (tool: string) => void}
-        onThemeToggle={handleThemeToggle}
-        selectedPrimitiveIds={selectedPrimitiveIds}
-      />
-    </div>
+        <canvas
+          ref={canvasRef}
+          width={canvasSize.w}
+          height={canvasSize.h}
+          style={{border: "none", display: "block",
+                   width: "100vw", height: "100vh", 
+                   cursor: cursor}}
+          onMouseDown={handleMouseDown}
+          onMouseMove={handleMouseMove}
+          onMouseUp={handleMouseUp}
+          onContextMenu={handleContextMenu}
+          tabIndex={0}
+        />
+        <UIOverlay
+          key={currentTheme}
+          scale={scale}
+          debug={debug}
+          setDebug={setDebug}
+          handleClear={handleClear}
+          orthoSnapEnabled={orthoSnapEnabled}
+          setOrthoSnapEnabled={setOrthoSnapEnabled}
+          shiftHeld={shiftHeld}
+          orthoTempDisabled={orthoTempDisabled}
+          activeTool={activeTool}
+          onToolChange={handleToolChange as (tool: string) => void}
+          onThemeToggle={handleThemeToggle}
+          selectedPrimitiveIds={selectedPrimitiveIds}
+        />
+      </div>
+    </ErrorBoundary>
   );
 };
 
