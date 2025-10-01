@@ -6,6 +6,7 @@
 import { Renderer } from "../pkg/draftr_engine";
 import { layerService, type Layer } from './LayerService';
 import { selectionService, type Primitive } from './SelectionService';
+import { type Bounds } from '../types/ToolTypes';
 
 
 const CROSS_INDICATOR_SIZE = 10; // px
@@ -48,19 +49,83 @@ export interface RedrawParams {
 
 export class RenderService {
   private renderer: Renderer;
+  private canvas: HTMLCanvasElement;
   private selectionHighlightColor = { r: 0.53, g: 0.81, b: 0.98, a: 1.0 }; // Default
   private selectionHandleColor = { r: 0.53, g: 0.81, b: 0.98, a: 1.0 };    // Default
+  private readonly LOD_THRESHOLD = 0.15;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
+    this.canvas = canvas;
   }
 
+  // Selection highlighting
   setSelectionHighlightColor(color: { r: number; g: number; b: number; a: number }): void {
     this.selectionHighlightColor = color;
   }
   setSelectionHandleColor(color: { r: number; g: number; b: number; a: number }): void {
     this.selectionHandleColor = color;
   }
+
+  // Viewport culling helper methods
+  private getViewportBounds(offsetX: number, offsetY: number, scale: number): Bounds {
+    // Calculate viewport bounds in world coordinates
+    const width = this.canvas.width / scale;
+    const height = this.canvas.height / scale;
+    
+    // 🎯 FIX: Use dynamic padding based on zoom level
+    // At normal zoom: no padding, at very low zoom: small padding
+    const minPadding = 0.1; // 10% padding at normal zoom
+    const maxPadding = 0.3; // 30% padding at very low zoom
+    const paddingFactor = Math.max(minPadding, Math.min(maxPadding, 0.3 - scale));
+    
+    const paddedWidth = width * (1 + paddingFactor);
+    const paddedHeight = height * (1 + paddingFactor);
+    
+    const centerX = -offsetX + width / 2;
+    const centerY = -offsetY + height / 2;
+    
+    return {
+      left: centerX - paddedWidth / 2,
+      right: centerX + paddedWidth / 2,
+      top: centerY - paddedHeight / 2, 
+      bottom: centerY + paddedHeight / 2
+    };
+  }
+  private boundsIntersect(a: Bounds, b: Bounds): boolean {
+    return !(a.right < b.left || 
+             a.left > b.right || 
+             a.bottom < b.top || 
+             a.top > b.bottom);
+  }
+  private getPrimitiveBounds(primitive: Primitive): Bounds {
+    switch (primitive.type) {
+      case 'line':
+        const [x1, y1, x2, y2] = primitive.data;
+        return {
+          left: Math.min(x1, x2),
+          right: Math.max(x1, x2),
+          top: Math.min(y1, y2),
+          bottom: Math.max(y1, y2)
+        };
+      case 'rectangle':
+        const [rectX1, rectY1, rectX2, rectY2] = primitive.data;
+        return {
+          left: Math.min(rectX1, rectX2),
+          right: Math.max(rectX1, rectX2),
+          top: Math.min(rectY1, rectY2),
+          bottom: Math.max(rectY1, rectY2)
+        };
+      default:
+        // For unknown types, assume they're visible (safe fallback)
+        return { left: -Infinity, right: Infinity, top: -Infinity, bottom: Infinity };
+    }
+  }
+  private shouldRenderPrimitive(primitive: Primitive, viewportBounds: Bounds): boolean {
+    const primitiveBounds = this.getPrimitiveBounds(primitive);
+    return this.boundsIntersect(primitiveBounds, viewportBounds);
+  }
+
 
   // Drawing Primitives
   drawLine(x1: number, y1: number, x2: number, y2: number, r: number, g: number, b: number, a: number): void {
@@ -72,27 +137,61 @@ export class RenderService {
   drawRectangle(x1: number, y1: number, x2: number, y2: number, r: number, g: number, b: number, a: number, filled: boolean): void {
     this.renderer.draw_rectangle(x1, y1, x2, y2, r, g, b, a, filled);
   }
-  drawAllPrimitives(): void {
+  drawAllPrimitives(offsetX: number, offsetY: number, scale: number): void {
     const allPrimitives = selectionService.getAllPrimitives();
-  
-    // Group primitives by layer for efficient rendering
-    const primitivesByLayer = this.groupPrimitivesByLayer(allPrimitives);
+    const viewportBounds = this.getViewportBounds(offsetX, offsetY, scale);
+
+    // 🎯 LOD: Decide whether to use simplified rendering
+    const useLOD = scale < this.LOD_THRESHOLD;
     
-    // Render layers in hierarchy order
+    // Group primitives by layer
+    const primitivesByLayer = this.groupPrimitivesByLayer(allPrimitives);
+    const filteredPrimitivesByLayer = new Map<string, Primitive[]>();
+    
+    let visiblePrimitiveCount = 0;
+    let totalPrimitiveCount = allPrimitives.length;
+    
+    primitivesByLayer.forEach((primitives, layerId) => {
+      const visiblePrimitives = primitives.filter(primitive => 
+        this.shouldRenderPrimitive(primitive, viewportBounds)
+      );
+      visiblePrimitiveCount += visiblePrimitives.length;
+      
+      if (visiblePrimitives.length > 0) {
+        filteredPrimitivesByLayer.set(layerId, visiblePrimitives);
+      }
+    });
+    
+    // 🎯 DEBUG: Log rendering stats (remove after testing)
+    if (totalPrimitiveCount > 200 && useLOD) {
+      console.log(`🎯 LOD + Culling: ${visiblePrimitiveCount}/${totalPrimitiveCount} primitives (${Math.round(visiblePrimitiveCount/totalPrimitiveCount*100)}% visible)`);
+    }
+
+    // Render layers
     const layersInRenderOrder = this.getLayersInRenderOrder();
     
-    // Render orphaned primitives first (or last, depending on desired z-order)
-    const orphanedPrimitives = primitivesByLayer.get('__orphaned__') || [];
+    // Render orphaned primitives
+    const orphanedPrimitives = filteredPrimitivesByLayer.get('__orphaned__') || [];
     if (orphanedPrimitives.length > 0) {
-      this.drawOrphanedPrimitives(orphanedPrimitives);
+      if (useLOD) {
+        this.drawSimplifiedPrimitives(orphanedPrimitives, offsetX, offsetY, scale);
+      } else {
+        this.drawOrphanedPrimitives(orphanedPrimitives);
+      }
     }
     
-    // Then render layered primitives
+    // Render layered primitives
     layersInRenderOrder.forEach(layer => {
       if (!layer.properties.visible) return;
       
-      const layerPrimitives = primitivesByLayer.get(layer.id) || [];
-      this.drawPrimitivesWithLayerProperties(layerPrimitives, layer);
+      const layerPrimitives = filteredPrimitivesByLayer.get(layer.id) || [];
+      if (layerPrimitives.length > 0) {
+        if (useLOD) {
+          this.drawSimplifiedPrimitives(layerPrimitives, offsetX, offsetY, scale);
+        } else {
+          this.drawPrimitivesWithLayerProperties(layerPrimitives, layer);
+        }
+      }
     });
   }
   private drawOrphanedPrimitives(primitives: Primitive[]): void {
@@ -166,7 +265,7 @@ export class RenderService {
     }
 
     // Enhanced: Use layer-aware drawing
-    this.drawAllPrimitives();
+    this.drawAllPrimitives(offsetX, offsetY, scale);
 
     // Draw selection highlights on top
     const selectedPrimitives = selectionService.getPrimitivesByIds(selectedPrimitiveIds);
@@ -224,6 +323,8 @@ export class RenderService {
       }
     }
   }
+
+
 
   // Draw UX graphics
   drawSelectionRectangle(x1: number, y1: number, x2: number, y2: number): void {
@@ -390,6 +491,90 @@ export class RenderService {
     }
 
     return { angle: bestCandidate, base: bestBase, diff: bestDiff };
+  }
+
+
+  // LOD System
+  private drawSimplifiedPrimitives(primitives: Primitive[], offsetX: number, offsetY: number, scale: number): void {
+    const minPixelSize = 2.0; // Don't draw details smaller than 2 pixels
+    
+    primitives.forEach(primitive => {
+      switch (primitive.type) {
+        case 'line':
+          this.drawSimplifiedLine(primitive, offsetX, offsetY, scale, minPixelSize);
+          break;
+        case 'rectangle':
+          this.drawSimplifiedRectangle(primitive, offsetX, offsetY, scale, minPixelSize);
+          break;
+        default:
+          // 🛡️ SAFETY: Fallback to normal drawing for unknown types
+          this.drawPrimitiveNormal(primitive);
+      }
+    });
+  }
+  private drawSimplifiedLine(primitive: Primitive, offsetX: number, offsetY: number, scale: number, minPixelSize: number): void {
+    const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+    
+    // Calculate screen space length
+    const screenX1 = (x1 + offsetX) * scale;
+    const screenY1 = (y1 + offsetY) * scale;
+    const screenX2 = (x2 + offsetX) * scale;
+    const screenY2 = (y2 + offsetY) * scale;
+    
+    const screenLength = Math.sqrt(
+      Math.pow(screenX2 - screenX1, 2) + Math.pow(screenY2 - screenY1, 2)
+    );
+    
+    // If line is very small on screen, draw as point instead of full line
+    if (screenLength < minPixelSize) {
+      // Draw as a small point to maintain visibility
+      const pointSize = minPixelSize / scale; // Convert back to world units
+      this.drawCircle(
+        (x1 + x2) / 2, (y1 + y2) / 2, // Center point
+        pointSize * 0.5, // Small radius
+        r, g, b, a * 0.6, // Slightly transparent
+        6, // Few segments for simple circle
+        false // Screen space
+      );
+    } else {
+      // 🛡️ SAFETY: Draw normal line but with full opacity
+      this.drawLine(x1, y1, x2, y2, r, g, b, a);
+    }
+  }
+  private drawSimplifiedRectangle(primitive: Primitive, offsetX: number, offsetY: number, scale: number, minPixelSize: number): void {
+    const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+    
+    // Calculate screen space dimensions
+    const screenWidth = Math.abs(x2 - x1) * scale;
+    const screenHeight = Math.abs(y2 - y1) * scale;
+    
+    // If rectangle is very small on screen, draw as point
+    if (screenWidth < minPixelSize && screenHeight < minPixelSize) {
+      // Draw as a small point
+      const pointSize = minPixelSize / scale;
+      this.drawCircle(
+        (x1 + x2) / 2, (y1 + y2) / 2, // Center
+        pointSize * 0.5,
+        r, g, b, a * 0.6,
+        6, true
+      );
+    } else {
+      // 🛡️ SAFETY: Draw normal rectangle
+      this.drawRectangle(x1, y1, x2, y2, r, g, b, a, false);
+    }
+  }
+  private drawPrimitiveNormal(primitive: Primitive): void {
+    // Fallback method for normal primitive drawing
+    switch (primitive.type) {
+      case 'line':
+        const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+        this.drawLine(x1, y1, x2, y2, r, g, b, a);
+        break;
+      case 'rectangle':
+        const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
+        this.drawRectangle(rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA, false);
+        break;
+    }
   }
 
 

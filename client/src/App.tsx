@@ -109,11 +109,13 @@ const App: React.FC = () => {
     position: { x: number; y: number };
     strength: number;
   } | null>(null);
-  const [snapResult, setSnapResult] = useState<SnapResult>({
+  const snapResultRef = useRef<SnapResult>({
     position: { x: 0, y: 0 },
     type: 'none',
     strength: 0
   });
+  const [snapUpdateCount, setSnapUpdateCount] = useState(0);
+  const forceUpdate = () => setSnapUpdateCount(prev => prev + 1);
   const [snapConfig] = useState({ enabled: true });
   const [hysteresisActive, setHysteresisActive] = useState(false);
   const createNoSnapResult = (): SnapResult => ({
@@ -169,7 +171,7 @@ const App: React.FC = () => {
     const service = serviceRef.current;
     
     // Layer-aware redraw method
-    service.redrawAll(preview, snapResult, {
+    service.redrawAll(preview, snapResultRef.current, {
       offsetX, offsetY, scale,
       activeTool, 
       activeConstraint,
@@ -347,96 +349,6 @@ const App: React.FC = () => {
     CommandAdapters.addVertexConstraint(vertex);
   };
 
-  // Snapping logic
-  const findSnap = (pos: { x: number; y: number }): SnapResult => {
-    if (!snapConfig.enabled || activeTool === 'SELECTION') {
-      const result: SnapResult = {
-        position: screenToWorld(pos.x, pos.y),
-        type: 'none',
-        strength: 0
-      };
-      setSnapResult(result);
-      CommandAdapters.setActiveConstraint(null);
-      setHysteresisActive(false);
-      setCurrentSnap(null);
-      return result;
-    }
-  
-    const result = snappingService.findSnap(pos, contextManager.getContext());
-
-    // Hysteresis state management
-    if (hysteresisActive && currentSnap?.type === 'vertex') {
-      const cursorScreen = pos;
-      const snapScreen = worldToScreen(currentSnap.position.x, currentSnap.position.y);
-      const screenDistance = Math.sqrt(
-        Math.pow(cursorScreen.x - snapScreen.x, 2) + 
-        Math.pow(cursorScreen.y - snapScreen.y, 2)
-      );
-      const UNSNAP_THRESHOLD = SNAP_THRESHOLD * 1.5;
-      
-      if (screenDistance <= UNSNAP_THRESHOLD) {
-        const stickResult: SnapResult = {
-          position: currentSnap.position,
-          type: currentSnap.type,
-          metadata: { vertex: currentSnap.position },
-          strength: Math.max(0.7, 1 - (screenDistance / UNSNAP_THRESHOLD))
-        };
-        
-        setSnapResult(stickResult);
-        return stickResult;
-      } else {
-        setHysteresisActive(false);
-        setCurrentSnap(null);
-      }
-    }
-  
-    // Activate or deactivate hysteresis
-    if (result.type === 'vertex') {
-      setHysteresisActive(true);
-      setCurrentSnap({
-        type: result.type,
-        position: result.position,
-        strength: result.strength
-      });
-    } else {
-      if (hysteresisActive) {
-        setHysteresisActive(false);
-        setCurrentSnap(null);
-      }
-    }
-  
-    // Handle constraint state
-    if (result.type === 'constraint' && result.metadata?.constraint) {
-      CommandAdapters.setActiveConstraint(result.metadata.constraint);
-    } else if (result.type === 'intersection' && result.metadata?.constraint) {
-      CommandAdapters.setActiveConstraint(result.metadata.constraint);
-    } else if (result.type === 'vertex') {
-      CommandAdapters.setActiveConstraint(null);
-    } else {
-      CommandAdapters.setActiveConstraint(null);
-    }
-  
-    // Handle temporary disabling
-    if (result.type === 'vertex' || hysteresisActive) {
-      if (orthoSnapEnabled && !orthoTempDisabled) {
-        setOrthoTempDisabled(true);
-      }
-      if (!constraintTempDisabled && vertexConstraints.length > 0) {
-        setConstraintTempDisabled(true);
-      }
-    } else {
-      if (orthoTempDisabled) {
-        setOrthoTempDisabled(false);
-      }
-      if (constraintTempDisabled) {
-        setConstraintTempDisabled(false);
-      }
-    }
-
-    setSnapResult(result);
-    return result;
-  };
-
   // Orthogonal helpers
   const nearestOrthoAngleDeg = (start: { x: number; y: number }, cursorWorld: { x: number; y: number }) => {
     const dx = cursorWorld.x - start.x;
@@ -493,7 +405,6 @@ const App: React.FC = () => {
 
   
   ////////// INITIALIZATION \\\\\\\\\\
-  
   useEffect(() => {
     const run = async () => {
       await init();
@@ -617,7 +528,6 @@ const App: React.FC = () => {
         
         return true;
       };
-      
       (window as any).getPerformanceMetrics = () => performanceMonitor.getMetrics();
       (window as any).resetPerformanceMetrics = () => performanceMonitor.reset();
       (window as any).togglePerformanceOverlay = () => setShowPerformance(prev => !prev);
@@ -646,6 +556,100 @@ const App: React.FC = () => {
         console.log('📋 Test 3: Testing error boundary (check console for boundary catch)');
         
         return true;
+      };
+
+      ////////// TEST CULLING
+      (window as any).testPerformanceLines = (count: number = 300) => {
+        console.log(`🧪 Drawing ${count} random test lines...`);
+        
+        const startTime = performance.now();
+        const linesCreated = [];
+        
+        // Get canvas bounds for reasonable distribution
+        const canvas = canvasRef.current;
+        if (!canvas) {
+          console.error('❌ Canvas not found');
+          return;
+        }
+        
+        const width = canvas.width;
+        const height = canvas.height;
+        const scale = appStateStore.getState().scale;
+        
+        // Convert screen bounds to world coordinates for reasonable distribution
+        const worldWidth = width / scale;
+        const worldHeight = height / scale;
+        
+        for (let i = 0; i < count; i++) {
+          // Create lines spread across a larger area than viewport
+          const spreadFactor = 3; // Lines will be spread over 3x viewport area
+          const x1 = (Math.random() - 0.5) * worldWidth * spreadFactor;
+          const y1 = (Math.random() - 0.5) * worldHeight * spreadFactor;
+          const x2 = x1 + (Math.random() - 0.5) * worldWidth * 0.5;
+          const y2 = y1 + (Math.random() - 0.5) * worldHeight * 0.5;
+          
+          const testPrimitive = {
+            id: `perf-test-line-${i}`,
+            type: 'line' as const,
+            data: [x1, y1, x2, y2, 1, 1, 1, 1], // White lines
+            layerId: 'Default'
+          };
+          
+          CommandAdapters.drawLine(testPrimitive);
+          linesCreated.push(testPrimitive.id);
+        }
+        
+        const endTime = performance.now();
+        console.log(`✅ Created ${linesCreated.length} lines in ${(endTime - startTime).toFixed(2)}ms`);
+        console.log(`📊 Check console for viewport culling messages when zooming out`);
+        
+        return linesCreated;
+      };
+      (window as any).clearTestLines = () => {
+        const state = appStateStore.getState();
+        const testLineIds = state.primitives
+          .filter(p => p.id.startsWith('perf-test-line-'))
+          .map(p => p.id);
+        
+        if (testLineIds.length > 0) {
+          CommandAdapters.deleteSelected(testLineIds);
+          console.log(`🗑️ Cleared ${testLineIds.length} test lines`);
+        } else {
+          console.log('ℹ️ No test lines found to clear');
+        }
+      };
+      (window as any).runPerformanceTest = (lineCounts = [100, 300, 500, 1000]) => {
+        console.log('🚀 Running performance test suite...');
+        
+        lineCounts.forEach(count => {
+          console.log(`\n📋 Testing with ${count} lines:`);
+          
+          // Clear previous test
+          (window as any).clearTestLines();
+          
+          // Create new lines
+          const startTime = performance.now();
+          (window as any).testPerformanceLines(count);
+          const creationTime = performance.now() - startTime;
+          
+          console.log(`   Creation: ${creationTime.toFixed(2)}ms`);
+          
+          // Test panning performance
+          const panStartTime = performance.now();
+          // Simulate some panning by triggering multiple redraws
+          for (let i = 0; i < 10; i++) {
+            redrawAll(null, snapResultRef.current);
+          }
+          const panTime = performance.now() - panStartTime;
+          
+          console.log(`   Redraws: ${panTime.toFixed(2)}ms`);
+          
+          // Get current primitive count
+          const totalPrimitives = appStateStore.getState().primitives.length;
+          console.log(`   Total primitives: ${totalPrimitives}`);
+        });
+        
+        console.log('\n🎉 Performance test completed');
       };
     }
   }, [serviceRef.current]);
@@ -706,7 +710,7 @@ const App: React.FC = () => {
       );
       
       // Redraw to apply the new canvas background color immediately
-      redrawAll(previewEnd, snapResult);
+      redrawAll(previewEnd, snapResultRef.current);
     }
   }, [canvasColor, selectionColor]);
 
@@ -724,14 +728,14 @@ const App: React.FC = () => {
       }
       if (serviceRef.current) {
         serviceRef.current.resize(w, h);
-        redrawAll(previewEnd, snapResult);
+        redrawAll(previewEnd, snapResultRef.current);
       }
     };
 
     window.addEventListener("resize", handleResize);
     handleResize();
     return () => window.removeEventListener("resize", handleResize);
-  }, [primitives, scale, offsetX, offsetY, previewEnd, snapResult, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
+  }, [primitives, scale, offsetX, offsetY, previewEnd, snapResultRef.current, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
 
   // Global error handlers
   
@@ -865,9 +869,9 @@ const App: React.FC = () => {
 
   // Redraw all states
   useEffect(() => {
-    redrawAll(previewEnd, snapResult);
+    redrawAll(previewEnd, snapResultRef.current);
   }, [primitives, scale, offsetX, offsetY, previewEnd, 
-  lineColor, snapColor, snapResult, orthoConfig, 
+  lineColor, snapColor, snapResultRef.current, orthoConfig, 
   shiftHeld, orthoSnapEnabled, orthoTempDisabled, 
   vertexConstraints, activeConstraint, gridConfig, 
   canvasColor, selectionColor, currentTheme, 
@@ -880,10 +884,63 @@ const App: React.FC = () => {
     // Throttled mouse move handler
     throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = getMousePos(evt);
-      const snapResult = findSnap(pos);
-      const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
-      const cursorWorld = constraintSnap ?? 
-                         (snapResult.type !== 'none' ? snapResult.position : screenToWorld(pos.x, pos.y));
+
+      // 🎯 INLINE SNAPPING LOGIC START
+      let newSnapResult: SnapResult;
+        if (!snapConfig.enabled || activeTool === 'SELECTION') {
+          newSnapResult = {
+            position: screenToWorld(pos.x, pos.y),
+            type: 'none',
+            strength: 0
+          };
+        } else {
+          newSnapResult = snappingService.findSnap(pos, contextManager.getContext());
+          
+          // Hysteresis logic...
+          if (hysteresisActive && currentSnap?.type === 'vertex') {
+            const cursorScreen = pos;
+            const snapScreen = worldToScreen(currentSnap.position.x, currentSnap.position.y);
+            const screenDistance = Math.sqrt(
+              Math.pow(cursorScreen.x - snapScreen.x, 2) + 
+              Math.pow(cursorScreen.y - snapScreen.y, 2)
+            );
+            const UNSNAP_THRESHOLD = SNAP_THRESHOLD * 1.5;
+            
+            if (screenDistance <= UNSNAP_THRESHOLD) {
+              newSnapResult = {
+                position: currentSnap.position,
+                type: currentSnap.type,
+                metadata: { vertex: currentSnap.position },
+                strength: Math.max(0.7, 1 - (screenDistance / UNSNAP_THRESHOLD))
+              };
+            }
+          }
+          
+          // Constraint state handling...
+          if (newSnapResult.type === 'constraint' && newSnapResult.metadata?.constraint) {
+            CommandAdapters.setActiveConstraint(newSnapResult.metadata.constraint);
+          } else if (newSnapResult.type === 'intersection' && newSnapResult.metadata?.constraint) {
+            CommandAdapters.setActiveConstraint(newSnapResult.metadata.constraint);
+          } else {
+            CommandAdapters.setActiveConstraint(null);
+          }
+        }
+        
+        // 🎯 FIX: Update ref instead of state
+        const prevSnap = snapResultRef.current;
+        const hasChanged = prevSnap.type !== newSnapResult.type || 
+                          prevSnap.position.x !== newSnapResult.position.x || 
+                          prevSnap.position.y !== newSnapResult.position.y ||
+                          prevSnap.strength !== newSnapResult.strength;
+        
+        if (hasChanged) {
+          snapResultRef.current = newSnapResult;
+          forceUpdate(); 
+        }
+      // 🎯 INLINE SNAPPING LOGIC END
+
+      const constraintSnap = newSnapResult.type === 'constraint' ? newSnapResult.position : null;
+      const cursorWorld = constraintSnap ?? (newSnapResult.type !== 'none' ? newSnapResult.position : screenToWorld(pos.x, pos.y));
       let preview = cursorWorld;
 
       // Panning functionality
@@ -895,7 +952,7 @@ const App: React.FC = () => {
         
         setIsDrawing(false);
         setPanStart({ x: pos.x, y: pos.y });
-        debouncedRedraw(previewEnd, snapResult);
+        debouncedRedraw(previewEnd, newSnapResult);
         return;
       }
 
@@ -910,14 +967,14 @@ const App: React.FC = () => {
         
         if (distanceMoved > 0.5) { // Threshold to reduce micro-updates
           CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
-          redrawAll(previewEnd, snapResult);
+          redrawAll(previewEnd, newSnapResult);
         }
         return;
       }
 
       // Check for vertex hover to toggle constraints
-      if (snapResult.type === 'vertex' && snapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
-        const vertex = snapResult.metadata.vertex;
+      if (newSnapResult.type === 'vertex' && newSnapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+        const vertex = newSnapResult.metadata.vertex;
         const key = getVertexKey(vertex);
         if (!hoveredVerticesRef.current.has(key)) {
           hoveredVerticesRef.current.add(key);
@@ -933,11 +990,11 @@ const App: React.FC = () => {
       if (activeTool === 'LINE') {
         if (hysteresisActive && currentSnap?.type === 'vertex') {
           preview = currentSnap.position;
-        } else if (snapResult.type === 'vertex' || snapResult.type === 'intersection') {
-          if (snapResult.type === 'intersection' && snapResult.strength > 0.1) {
-            preview = snapResult.position;
-          } else if (snapResult.type === 'vertex') {
-            preview = snapResult.position;
+        } else if (newSnapResult.type === 'vertex' || newSnapResult.type === 'intersection') {
+          if (newSnapResult.type === 'intersection' && newSnapResult.strength > 0.1) {
+            preview = newSnapResult.position;
+          } else if (newSnapResult.type === 'vertex') {
+            preview = newSnapResult.position;
           }
         } else if (shiftHeld) {
           const dx = cursorWorld.x - currentStart.x;
@@ -952,27 +1009,27 @@ const App: React.FC = () => {
             preview = { x: constrained.x, y: constrained.y };
           }
         } else {
-          preview = snapResult.position;
+          preview = newSnapResult.position;
         }
 
         CommandAdapters.updatePreview(preview);
-        debouncedRedraw(preview, snapResult);
+        debouncedRedraw(preview, newSnapResult);
         return;
       }
 
       // Rectangle preview
       if (activeTool === 'RECTANGLE' && currentStart) {
         CommandAdapters.updatePreview(cursorWorld);
-        debouncedRedraw(cursorWorld, snapResult);
+        debouncedRedraw(cursorWorld, newSnapResult);
         return;
       }
 
       CommandAdapters.updatePreview(preview);
-      debouncedRedraw(preview, snapResult);
+      debouncedRedraw(preview, newSnapResult);
     }, 8), // 8ms throttle for overall handlers except SELECTION
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
-      findSnap, screenToWorld, snappingService, debouncedRedraw, previewEnd,
+      screenToWorld, snappingService, debouncedRedraw, previewEnd,
       hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled, orthoTempDisabled
     ]
   );
@@ -982,7 +1039,20 @@ const App: React.FC = () => {
 
     if (evt.button === 0) {
       const activeLayer = layerService.getActiveLayer();
-      const snapResult = findSnap(pos);
+
+      // 🎯 REPLACE: const snapResult = findSnap(pos);
+      // With inline snap calculation:
+      let snapResult: SnapResult;
+      if (!snapConfig.enabled || activeTool === 'SELECTION') {
+        snapResult = {
+          position: screenToWorld(pos.x, pos.y),
+          type: 'none',
+          strength: 0
+        };
+      } else {
+        snapResult = snappingService.findSnap(pos, contextManager.getContext());
+      }
+
       const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
       let intersectionSnap = null;
       let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
@@ -1108,7 +1178,7 @@ const App: React.FC = () => {
     } else if (evt.button === 1) {
       setPanStart(null);
       CommandAdapters.panFinal(offsetX, offsetY);
-      redrawAll(previewEnd, snapResult);
+      redrawAll(previewEnd, snapResultRef.current);
     }
   };
 
@@ -1141,7 +1211,8 @@ const App: React.FC = () => {
     CommandAdapters.setActiveConstraint(null);
     CommandAdapters.clearVertexConstraints();
     
-    setSnapResult(createNoSnapResult());
+    snapResultRef.current = createNoSnapResult();
+    forceUpdate();
     setHysteresisActive(false);
     setCurrentSnap(null);
     hoveredVerticesRef.current.clear();
@@ -1218,7 +1289,7 @@ const App: React.FC = () => {
     setSelectionHighlightColor(currentColors.selectionHighlightColor);
     setSelectionHandleColor(currentColors.selectionHandleColor);
     
-    redrawAll(previewEnd, snapResult);
+    redrawAll(previewEnd, snapResultRef.current);
   };
 
   
