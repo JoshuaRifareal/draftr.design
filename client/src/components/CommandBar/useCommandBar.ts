@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { type Command, commandRegistry, searchCommands } from './commands';
 
 interface UseCommandBarReturn {
@@ -21,7 +21,7 @@ export const useCommandBar = (): UseCommandBarReturn => {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   // Track current mouse position
-  const [currentMousePos, setCurrentMousePos] = useState({ x: 0, y: 0 });
+  const currentMousePosRef = useRef({ x: 0, y: 0 });
 
   // Search when query changes
   useEffect(() => {
@@ -35,7 +35,7 @@ export const useCommandBar = (): UseCommandBarReturn => {
   // Track mouse movement for positioning
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
-      setCurrentMousePos({ x: e.clientX, y: e.clientY });
+      currentMousePosRef.current = { x: e.clientX, y: e.clientY };
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -45,42 +45,42 @@ export const useCommandBar = (): UseCommandBarReturn => {
   // Global keyboard listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-
       const activeElement = document.activeElement;
       const isTypingInInput = activeElement?.tagName === 'INPUT' || 
-                              activeElement?.tagName === 'TEXTAREA' ||
-                              activeElement?.getAttribute('contenteditable') === 'true';
+                              activeElement?.tagName === 'TEXTAREA';
 
-      // If user is typing in any input, ignore command bar activation
-      if (isTypingInInput) {
+      // 🎯 IGNORE ESC in command bar - let App.tsx handle it
+      if (e.key === 'Escape') {
+        // If command bar is open, close it but don't prevent default
+        console.log('🔍 ESC in useCommandBar listener - isOpen:', isOpen);
+        if (isOpen) {
+          e.preventDefault();
+          closeCommandBar();
+        }
+        // If command bar is closed, DO NOTHING - let event bubble to App.tsx
         return;
       }
 
       // Ctrl+K activation
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault();
-
         if (!isTypingInInput && !isOpen) {
-          openCommandBar(currentMousePos.x, currentMousePos.y);
+          openCommandBar(currentMousePosRef.current.x, currentMousePosRef.current.y);
         }
         return;
       }
 
-      // Type-to-activate (ignore if command bar already open)
+      // Type-to-activate (ignore if command bar already open OR user is typing)
       if (!isOpen && shouldActivateOnType(e) && !isTypingInInput) {
         e.preventDefault();
-        openCommandBar(currentMousePos.x, currentMousePos.y);
-        setSearchQuery(e.key); // Start with the typed character
+        openCommandBar(currentMousePosRef.current.x, currentMousePosRef.current.y);
+        setSearchQuery(e.key);
         return;
       }
 
-      // Handle keys when command bar is open
+      // Handle keys when command bar is open (except ESC which we handled above)
       if (isOpen) {
         switch (e.key) {
-          case 'Escape':
-            e.preventDefault();
-            closeCommandBar();
-            break;
           case 'ArrowDown':
             e.preventDefault();
             setSelectedIndex(prev => (prev + 1) % results.length);
@@ -89,13 +89,15 @@ export const useCommandBar = (): UseCommandBarReturn => {
             e.preventDefault();
             setSelectedIndex(prev => (prev - 1 + results.length) % results.length);
             break;
+          // 🎯 REMOVED: ESC case - handled above
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, results.length, currentMousePos]);
+    
+  }, [isOpen, results.length]);
 
   const openCommandBar = useCallback((x: number, y: number) => {
     setPosition({ x, y });

@@ -20,22 +20,12 @@ export class PerformanceMonitor {
   private frameCount = 0;
   private lastFrameTime = performance.now();
 
-  startMeasurement(label: string) {
-    if (typeof performance !== 'undefined' && performance.mark) {
-      performance.mark(`${label}-start`);
-    }
+  startMeasurement(label: string): number {
     return performance.now();
   }
 
-  endMeasurement(label: string, startTime: number) {
-    const endTime = performance.now();
-    const duration = endTime - startTime;
-    
-    if (typeof performance !== 'undefined' && performance.measure) {
-      performance.measure(`${label}-duration`, `${label}-start`);
-    }
-
-    return duration;
+  endMeasurement(label: string, startTime: number): number {
+    return performance.now() - startTime;
   }
 
   recordRedraw(duration: number) {
@@ -52,6 +42,7 @@ export class PerformanceMonitor {
   }
 
   updateFrameRate() {
+    this.frameCount++;
     const now = performance.now();
     const elapsed = now - this.lastFrameTime;
     
@@ -60,13 +51,12 @@ export class PerformanceMonitor {
       this.frameCount = 0;
       this.lastFrameTime = now;
     }
-    this.frameCount++;
   }
 
   getMetrics(): PerformanceMetrics {
     // Try to get memory usage if available
     if (typeof (performance as any).memory !== 'undefined') {
-      this.metrics.memoryUsage = (performance as any).memory.usedJSHeapSize / (1024 * 1024); // MB
+      this.metrics.memoryUsage = (performance as any).memory.usedJSHeapSize / (1024 * 1024);
     }
     
     return { ...this.metrics };

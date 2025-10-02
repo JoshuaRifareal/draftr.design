@@ -50,9 +50,9 @@ export interface RedrawParams {
 export class RenderService {
   private renderer: Renderer;
   private canvas: HTMLCanvasElement;
-  private selectionHighlightColor = { r: 0.53, g: 0.81, b: 0.98, a: 1.0 }; // Default
-  private selectionHandleColor = { r: 0.53, g: 0.81, b: 0.98, a: 1.0 };    // Default
-  private readonly LOD_THRESHOLD = 0.15;
+  private selectionHighlightColor = { r: 0.22, g: 0.58, b: 1.0, a: 1.0 }; // Default
+  private selectionHandleColor = { r: 0.22, g: 0.58, b: 1.0, a: 1.0 };    // Default
+  private readonly LOD_THRESHOLD = 0.35; /* <--- Zoom level */
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
@@ -140,16 +140,16 @@ export class RenderService {
   drawAllPrimitives(offsetX: number, offsetY: number, scale: number): void {
     const allPrimitives = selectionService.getAllPrimitives();
     const viewportBounds = this.getViewportBounds(offsetX, offsetY, scale);
-
+    
     // 🎯 LOD: Decide whether to use simplified rendering
     const useLOD = scale < this.LOD_THRESHOLD;
     
-    // Group primitives by layer
+    // Group primitives by layer for efficient rendering
     const primitivesByLayer = this.groupPrimitivesByLayer(allPrimitives);
     const filteredPrimitivesByLayer = new Map<string, Primitive[]>();
     
     let visiblePrimitiveCount = 0;
-    let totalPrimitiveCount = allPrimitives.length;
+    const totalPrimitiveCount = allPrimitives.length;
     
     primitivesByLayer.forEach((primitives, layerId) => {
       const visiblePrimitives = primitives.filter(primitive => 
@@ -162,11 +162,15 @@ export class RenderService {
       }
     });
     
-    // 🎯 DEBUG: Log rendering stats (remove after testing)
+    // Calculate visible percentage for adaptive LOD
+    const visiblePercentage = totalPrimitiveCount > 0 ? 
+      Math.round((visiblePrimitiveCount / totalPrimitiveCount) * 100) : 0;
+    
+    // 🎯 DEBUG: Log rendering stats
     if (totalPrimitiveCount > 200 && useLOD) {
-      console.log(`🎯 LOD + Culling: ${visiblePrimitiveCount}/${totalPrimitiveCount} primitives (${Math.round(visiblePrimitiveCount/totalPrimitiveCount*100)}% visible)`);
+      console.log(`🎯 LOD + Culling: ${visiblePrimitiveCount}/${totalPrimitiveCount} primitives (${visiblePercentage}% visible)`);
     }
-
+    
     // Render layers
     const layersInRenderOrder = this.getLayersInRenderOrder();
     
@@ -174,7 +178,7 @@ export class RenderService {
     const orphanedPrimitives = filteredPrimitivesByLayer.get('__orphaned__') || [];
     if (orphanedPrimitives.length > 0) {
       if (useLOD) {
-        this.drawSimplifiedPrimitives(orphanedPrimitives, offsetX, offsetY, scale);
+        this.drawAdaptiveLODPrimitives(orphanedPrimitives, offsetX, offsetY, scale, visiblePercentage);
       } else {
         this.drawOrphanedPrimitives(orphanedPrimitives);
       }
@@ -187,7 +191,7 @@ export class RenderService {
       const layerPrimitives = filteredPrimitivesByLayer.get(layer.id) || [];
       if (layerPrimitives.length > 0) {
         if (useLOD) {
-          this.drawSimplifiedPrimitives(layerPrimitives, offsetX, offsetY, scale);
+          this.drawAdaptiveLODPrimitives(layerPrimitives, offsetX, offsetY, scale, visiblePercentage);
         } else {
           this.drawPrimitivesWithLayerProperties(layerPrimitives, layer);
         }
@@ -495,24 +499,72 @@ export class RenderService {
 
 
   // LOD System
-  private drawSimplifiedPrimitives(primitives: Primitive[], offsetX: number, offsetY: number, scale: number): void {
-    const minPixelSize = 2.0; // Don't draw details smaller than 2 pixels
-    
+  private drawAdaptiveLODPrimitives(primitives: Primitive[], offsetX: number, offsetY: number, scale: number, visiblePercentage: number): void {
+    // 🎯 Dynamic quality settings based on density
+    let qualitySettings: {
+      minPixelSize: number;    // Skip primitives smaller than this
+      pointAlpha: number;      // Transparency for simplified points
+      lineAlpha: number;       // Transparency for lines
+      circleSegments: number;  // Quality of circles
+    };
+
+    if (visiblePercentage > 60) {
+      // 🚀 HIGH DENSITY: Very aggressive optimization
+      qualitySettings = {
+        minPixelSize: 24.0,     // Skip anything < 4 pixels
+        pointAlpha: 0.3,       // Very transparent points
+        lineAlpha: 0.3,        // Transparent lines
+        circleSegments: 1      // Low quality circles
+      };
+    } else if (visiblePercentage > 30) {
+      // 🎯 MEDIUM DENSITY: Balanced optimization
+      qualitySettings = {
+        minPixelSize: 3.5,     // Skip anything < 2.5 pixels  
+        pointAlpha: 0.6,       // Semi-transparent points
+        lineAlpha: 0.8,        // Slightly transparent lines
+        circleSegments: 4      // Medium quality circles
+      };
+    } else {
+      // ✅ LOW DENSITY: Light optimization
+      qualitySettings = {
+        minPixelSize: 2.0,     // Skip anything < 2 pixels
+        pointAlpha: 0.8,       // Mostly opaque points
+        lineAlpha: 1.0,        // Full opacity lines
+        circleSegments: 8      // Good quality circles
+      };
+    }
+
+    // Debug logging (remove after testing)
+    if (primitives.length > 100) {
+      if (primitives.length > 100) {
+        let qualityLevel: string;
+        
+        if (visiblePercentage > 60) {
+          qualityLevel = 'LOW';
+        } else if (visiblePercentage > 30) {
+          qualityLevel = 'MEDIUM';
+        } else {
+          qualityLevel = 'HIGH';
+        }
+        console.log(`🎯 Adaptive LOD: ${visiblePercentage}% visible -> Quality: ${qualityLevel}`);
+      }
+    }
+
     primitives.forEach(primitive => {
       switch (primitive.type) {
         case 'line':
-          this.drawSimplifiedLine(primitive, offsetX, offsetY, scale, minPixelSize);
+          this.drawAdaptiveLine(primitive, offsetX, offsetY, scale, qualitySettings);
           break;
         case 'rectangle':
-          this.drawSimplifiedRectangle(primitive, offsetX, offsetY, scale, minPixelSize);
+          this.drawAdaptiveRectangle(primitive, offsetX, offsetY, scale, qualitySettings);
           break;
         default:
-          // 🛡️ SAFETY: Fallback to normal drawing for unknown types
+          // Fallback to normal drawing for unknown types
           this.drawPrimitiveNormal(primitive);
       }
     });
   }
-  private drawSimplifiedLine(primitive: Primitive, offsetX: number, offsetY: number, scale: number, minPixelSize: number): void {
+  private drawAdaptiveLine(primitive: Primitive, offsetX: number, offsetY: number, scale: number, quality: any): void {
     const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
     
     // Calculate screen space length
@@ -525,57 +577,54 @@ export class RenderService {
       Math.pow(screenX2 - screenX1, 2) + Math.pow(screenY2 - screenY1, 2)
     );
     
-    // If line is very small on screen, draw as point instead of full line
-    if (screenLength < minPixelSize) {
-      // Draw as a small point to maintain visibility
-      const pointSize = minPixelSize / scale; // Convert back to world units
+    // Skip or simplify based on quality settings
+    if (screenLength < quality.minPixelSize) {
+      // Draw as simplified point
       this.drawCircle(
-        (x1 + x2) / 2, (y1 + y2) / 2, // Center point
-        pointSize * 0.5, // Small radius
-        r, g, b, a * 0.6, // Slightly transparent
-        6, // Few segments for simple circle
-        false // Screen space
+        (x1 + x2) / 2, (y1 + y2) / 2,
+        quality.minPixelSize / scale * 0.3, // Smaller points at high density
+        r, g, b, a * quality.pointAlpha,
+        quality.circleSegments,
+        false
       );
     } else {
-      // 🛡️ SAFETY: Draw normal line but with full opacity
-      this.drawLine(x1, y1, x2, y2, r, g, b, a);
+      // Draw line with adaptive quality
+      this.drawLine(x1, y1, x2, y2, r, g, b, a * quality.lineAlpha);
     }
   }
-  private drawSimplifiedRectangle(primitive: Primitive, offsetX: number, offsetY: number, scale: number, minPixelSize: number): void {
+  private drawAdaptiveRectangle(primitive: Primitive, offsetX: number, offsetY: number, scale: number, quality: any): void {
     const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
     
-    // Calculate screen space dimensions
+    // Calculate screen space size
     const screenWidth = Math.abs(x2 - x1) * scale;
     const screenHeight = Math.abs(y2 - y1) * scale;
     
-    // If rectangle is very small on screen, draw as point
-    if (screenWidth < minPixelSize && screenHeight < minPixelSize) {
-      // Draw as a small point
-      const pointSize = minPixelSize / scale;
+    if (screenWidth < quality.minPixelSize && screenHeight < quality.minPixelSize) {
+      // Draw as point
       this.drawCircle(
-        (x1 + x2) / 2, (y1 + y2) / 2, // Center
-        pointSize * 0.5,
-        r, g, b, a * 0.6,
-        6, true
+        (x1 + x2) / 2, (y1 + y2) / 2,
+        quality.minPixelSize / scale * 0.3,
+        r, g, b, a * quality.pointAlpha,
+        quality.circleSegments,
+        false
       );
     } else {
-      // 🛡️ SAFETY: Draw normal rectangle
-      this.drawRectangle(x1, y1, x2, y2, r, g, b, a, false);
+      // Draw rectangle with adaptive quality
+      this.drawRectangle(x1, y1, x2, y2, r, g, b, a * quality.lineAlpha, false);
     }
   }
   private drawPrimitiveNormal(primitive: Primitive): void {
-    // Fallback method for normal primitive drawing
-    switch (primitive.type) {
-      case 'line':
-        const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
-        this.drawLine(x1, y1, x2, y2, r, g, b, a);
-        break;
-      case 'rectangle':
-        const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
-        this.drawRectangle(rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA, false);
-        break;
-    }
+  switch (primitive.type) {
+    case 'line':
+      const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+      this.drawLine(x1, y1, x2, y2, r, g, b, a);
+      break;
+    case 'rectangle':
+      const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
+      this.drawRectangle(rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA, false);
+      break;
   }
+}
 
 
   // Configuration methods

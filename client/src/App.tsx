@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import ReactDOM from 'react-dom';
 import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
@@ -98,10 +99,10 @@ const App: React.FC = () => {
   const [selectionHandleColor, setSelectionHandleColor] = useState(initialColors.selectionHandleColor);
 
   // Window resize state
-  const [canvasSize, setCanvasSize] = useState<{ w: number; h: number }>({
+  const canvasSizeRef = useRef<{ w: number; h: number }>({
     w: typeof window !== "undefined" ? window.innerWidth : 650,
     h: typeof window !== "undefined" ? window.innerHeight : 650,
-  });
+  })
 
   // Snap state and Hysteresis
   const [currentSnap, setCurrentSnap] = useState<{
@@ -114,8 +115,6 @@ const App: React.FC = () => {
     type: 'none',
     strength: 0
   });
-  const [snapUpdateCount, setSnapUpdateCount] = useState(0);
-  const forceUpdate = () => setSnapUpdateCount(prev => prev + 1);
   const [snapConfig] = useState({ enabled: true });
   const [hysteresisActive, setHysteresisActive] = useState(false);
   const createNoSnapResult = (): SnapResult => ({
@@ -139,10 +138,30 @@ const App: React.FC = () => {
   // Track hovered vertices for constraint toggling
   const hoveredVerticesRef = useRef<Set<string>>(new Set());
 
+  // Track last ESC press
+  const lastEscPressRef = useRef<number>(0);
+
   // Custom Cursor
   const [isDrawing, setIsDrawing] = useState(false);
   const cursor = useCursor(activeTool, shiftHeld, isDrawing, !!panStart, currentTheme);
   const [globalCursor, setGlobalCursor] = useState<string>(CURSORS.DEFAULT(currentTheme));
+  useEffect(() => {
+    const activeLayer = layerService.getActiveLayer();
+    const isLayerLocked = activeLayer?.properties.locked ?? false;
+    
+    let newCursor = CURSORS.DEFAULT(currentTheme);
+  
+    if (panStart) {
+      newCursor = CURSORS.PANNING;
+    } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
+      newCursor = CURSORS.DISABLED;
+    } else if (activeTool === 'SELECTION' && shiftHeld) {
+      newCursor = CURSORS.SELECT_SUBTRACT(currentTheme);
+    } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
+      newCursor = CURSORS.CROSSHAIR;
+    }
+    setGlobalCursor(newCursor);
+  }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
 
   // 🎯 PERFORMANCE: Add performance monitor
   const performanceMonitor = useRef(new PerformanceMonitor()).current;
@@ -165,7 +184,7 @@ const App: React.FC = () => {
 
   // 🎯 PERFORMANCE: Optimize redrawAll with useCallback
   const redrawAll = useCallback((preview: { x: number; y: number } | null, snapResult: SnapResult) => {
-    const startTime = performanceMonitor.startMeasurement('redrawAll');
+    const startTime = performance.now();
     
     if (!serviceRef.current || !canvasRef.current) return;
     const service = serviceRef.current;
@@ -215,24 +234,6 @@ const App: React.FC = () => {
 
   // Error state
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const activeLayer = layerService.getActiveLayer();
-    const isLayerLocked = activeLayer?.properties.locked ?? false;
-    
-    let newCursor = CURSORS.DEFAULT(currentTheme);
-  
-    if (panStart) {
-      newCursor = CURSORS.PANNING;
-    } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
-      newCursor = CURSORS.DISABLED;
-    } else if (activeTool === 'SELECTION' && shiftHeld) {
-      newCursor = CURSORS.SELECT_SUBTRACT(currentTheme);
-    } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
-      newCursor = CURSORS.CROSSHAIR;
-    }
-    setGlobalCursor(newCursor);
-  }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
 
   // Error display component
   const ErrorDisplay: React.FC<{ error: string | null; onDismiss: () => void }> = ({ error, onDismiss }) => {
@@ -401,7 +402,8 @@ const App: React.FC = () => {
     if (shiftHeld) return true;
     return orthoSnapEnabled && !orthoTempDisabled;
   };
-
+  const orthoSnapEnabledRef = useRef(orthoSnapEnabled);
+  const snappingServiceRef = useRef(snappingService);
 
   
   ////////// INITIALIZATION \\\\\\\\\\
@@ -430,12 +432,20 @@ const App: React.FC = () => {
         );
   
         service.clear();
-        service.resize(canvasSize.w, canvasSize.h);
+        service.resize(canvasSizeRef.current.w, canvasSizeRef.current.h);
         service.drawGrid(offsetX, offsetY, scale);
       }
     };
     run();
   }, []);
+
+  // Ortho and Snapping refs
+  useEffect(() => {
+    orthoSnapEnabledRef.current = orthoSnapEnabled;
+  }, [orthoSnapEnabled]);
+  useEffect(() => {
+    snappingServiceRef.current = snappingService;
+  }, [snappingService]);
 
   // Monitor frame rate
   useEffect(() => {
@@ -719,23 +729,27 @@ const App: React.FC = () => {
     const handleResize = () => {
       const w = window.innerWidth;
       const h = window.innerHeight;
-      setCanvasSize({ w, h });
+      
+      canvasSizeRef.current = { w, h };
+      
       if (canvasRef.current) {
         canvasRef.current.width = w * window.devicePixelRatio;
         canvasRef.current.height = h * window.devicePixelRatio;
         canvasRef.current.style.width = w + 'px';
         canvasRef.current.style.height = h + 'px';
       }
+      
       if (serviceRef.current) {
         serviceRef.current.resize(w, h);
-        redrawAll(previewEnd, snapResultRef.current);
+        redrawAll(previewEnd, snapResultRef.current); 
       }
     };
 
     window.addEventListener("resize", handleResize);
-    handleResize();
+    handleResize(); // Initial call to set size
+    
     return () => window.removeEventListener("resize", handleResize);
-  }, [primitives, scale, offsetX, offsetY, previewEnd, snapResultRef.current, orthoConfig, shiftHeld, orthoSnapEnabled, orthoTempDisabled, vertexConstraints, activeConstraint, gridConfig]);
+  }, []);
 
   // Global error handlers
   
@@ -769,10 +783,10 @@ const App: React.FC = () => {
 
       if (e.key === "Shift") setShiftHeld(true);
       if (e.key === "F8") {
-        const newOrthoEnabled = !orthoSnapEnabled;
+        const newOrthoEnabled = !orthoSnapEnabledRef.current;;
         setOrthoSnapEnabled(newOrthoEnabled);
         
-        snappingService.updateConfig({
+        snappingServiceRef.current.updateConfig({
           orthoEnabled: newOrthoEnabled
         });
         
@@ -803,9 +817,23 @@ const App: React.FC = () => {
         console.log('📊 Performance overlay toggled');
       }
       if (e.key === "Escape") {
-        CommandAdapters.setSelection([]);
-        CommandAdapters.setActiveTool('SELECTION');
-        resetTool();
+        // 🎯 Only handle ESC if command bar is NOT open
+        const commandBar = document.querySelector('.command-bar');
+        const isCommandBarOpen = commandBar && !commandBar.classList.contains('hidden');
+        
+        if (!isCommandBarOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation(); // 🎯 CRITICAL: Stop other listeners
+          
+          console.log('⌨️ ESC handled in App.tsx (command bar closed)');
+          CommandAdapters.setSelection([]);
+          CommandAdapters.setActiveTool('SELECTION');
+          resetTool();
+        } else {
+          console.log('⌨️ ESC ignored in App.tsx (command bar open)');
+        }
+        return;
       }
       if (e.ctrlKey || e.metaKey) {
         if (e.key === "z" || e.key === "Z") {
@@ -832,10 +860,10 @@ const App: React.FC = () => {
     window.addEventListener("keydown", onKeyDown, { capture: true });
     window.addEventListener("keyup", onKeyUp, { capture: true });
     return () => {
-      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keydown", onKeyDown, { capture: true });
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [orthoSnapEnabled]);
+  }, []);
 
   // Zoom functionality
   useEffect(() => {
@@ -881,67 +909,91 @@ const App: React.FC = () => {
   ////////// INTERACTION HANDLERS \\\\\\\\\\
 
   const handleMouseMove = useCallback(
-    // Throttled mouse move handler
     throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = getMousePos(evt);
-
-      // 🎯 INLINE SNAPPING LOGIC START
-      let newSnapResult: SnapResult;
-        if (!snapConfig.enabled || activeTool === 'SELECTION') {
-          newSnapResult = {
-            position: screenToWorld(pos.x, pos.y),
-            type: 'none',
-            strength: 0
-          };
-        } else {
-          newSnapResult = snappingService.findSnap(pos, contextManager.getContext());
+      
+      // 🎯 FIX: Only calculate snap for drawing tools
+      let snapResult: SnapResult;
+      
+      if (activeTool === 'SELECTION') {
+        // 🚫 SELECTION MODE: No snapping needed
+        snapResult = {
+          position: screenToWorld(pos.x, pos.y),
+          type: 'none',
+          strength: 0
+        };
+        snapResultRef.current = snapResult; // Update ref but no state
+      } else {
+        // ✅ DRAWING MODE: Calculate snapping
+        snapResult = snappingService.findSnap(pos, contextManager.getContext());
+        
+        // Hysteresis logic for drawing tools
+        if (hysteresisActive && currentSnap?.type === 'vertex') {
+          const cursorScreen = pos;
+          const snapScreen = worldToScreen(currentSnap.position.x, currentSnap.position.y);
+          const screenDistance = Math.sqrt(
+            Math.pow(cursorScreen.x - snapScreen.x, 2) + 
+            Math.pow(cursorScreen.y - snapScreen.y, 2)
+          );
+          const UNSNAP_THRESHOLD = SNAP_THRESHOLD * 1.5;
           
-          // Hysteresis logic...
-          if (hysteresisActive && currentSnap?.type === 'vertex') {
-            const cursorScreen = pos;
-            const snapScreen = worldToScreen(currentSnap.position.x, currentSnap.position.y);
-            const screenDistance = Math.sqrt(
-              Math.pow(cursorScreen.x - snapScreen.x, 2) + 
-              Math.pow(cursorScreen.y - snapScreen.y, 2)
-            );
-            const UNSNAP_THRESHOLD = SNAP_THRESHOLD * 1.5;
-            
-            if (screenDistance <= UNSNAP_THRESHOLD) {
-              newSnapResult = {
-                position: currentSnap.position,
-                type: currentSnap.type,
-                metadata: { vertex: currentSnap.position },
-                strength: Math.max(0.7, 1 - (screenDistance / UNSNAP_THRESHOLD))
-              };
-            }
-          }
-          
-          // Constraint state handling...
-          if (newSnapResult.type === 'constraint' && newSnapResult.metadata?.constraint) {
-            CommandAdapters.setActiveConstraint(newSnapResult.metadata.constraint);
-          } else if (newSnapResult.type === 'intersection' && newSnapResult.metadata?.constraint) {
-            CommandAdapters.setActiveConstraint(newSnapResult.metadata.constraint);
+          if (screenDistance <= UNSNAP_THRESHOLD) {
+            snapResult = {
+              position: currentSnap.position,
+              type: currentSnap.type,
+              metadata: { vertex: currentSnap.position },
+              strength: Math.max(0.7, 1 - (screenDistance / UNSNAP_THRESHOLD))
+            };
           } else {
-            CommandAdapters.setActiveConstraint(null);
+            setHysteresisActive(false);
+            setCurrentSnap(null);
           }
         }
         
-        // 🎯 FIX: Update ref instead of state
+        // Constraint state handling for drawing tools
+        if (snapResult.type === 'constraint' && snapResult.metadata?.constraint) {
+          CommandAdapters.setActiveConstraint(snapResult.metadata.constraint);
+        } else if (snapResult.type === 'intersection' && snapResult.metadata?.constraint) {
+          CommandAdapters.setActiveConstraint(snapResult.metadata.constraint);
+        } else if (snapResult.type === 'vertex') {
+          CommandAdapters.setActiveConstraint(null);
+        } else {
+          CommandAdapters.setActiveConstraint(null);
+        }
+        
+        // 🎯 FIX: Only update ref for drawing tools (no state updates)
         const prevSnap = snapResultRef.current;
-        const hasChanged = prevSnap.type !== newSnapResult.type || 
-                          prevSnap.position.x !== newSnapResult.position.x || 
-                          prevSnap.position.y !== newSnapResult.position.y ||
-                          prevSnap.strength !== newSnapResult.strength;
+        const hasChanged = prevSnap.type !== snapResult.type || 
+                          prevSnap.position.x !== snapResult.position.x || 
+                          prevSnap.position.y !== snapResult.position.y ||
+                          prevSnap.strength !== snapResult.strength;
         
         if (hasChanged) {
-          snapResultRef.current = newSnapResult;
-          forceUpdate(); 
+          snapResultRef.current = snapResult;
         }
-      // 🎯 INLINE SNAPPING LOGIC END
+        
+        // Handle temporary disabling for drawing tools
+        if (snapResult.type === 'vertex' || hysteresisActive) {
+          if (orthoSnapEnabled && !orthoTempDisabled) {
+            setOrthoTempDisabled(true);
+          }
+          if (!constraintTempDisabled && vertexConstraints.length > 0) {
+            setConstraintTempDisabled(true);
+          }
+        } else {
+          if (orthoTempDisabled) {
+            setOrthoTempDisabled(false);
+          }
+          if (constraintTempDisabled) {
+            setConstraintTempDisabled(false);
+          }
+        }
+      }
 
-      const constraintSnap = newSnapResult.type === 'constraint' ? newSnapResult.position : null;
-      const cursorWorld = constraintSnap ?? (newSnapResult.type !== 'none' ? newSnapResult.position : screenToWorld(pos.x, pos.y));
-      let preview = cursorWorld;
+      const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
+      let intersectionSnap = null;
+      let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
+      let preview = finalPos;
 
       // Panning functionality
       if (panStart) {
@@ -952,29 +1004,21 @@ const App: React.FC = () => {
         
         setIsDrawing(false);
         setPanStart({ x: pos.x, y: pos.y });
-        debouncedRedraw(previewEnd, newSnapResult);
+        debouncedRedraw(previewEnd, snapResultRef.current);
         return;
       }
 
-      // Selection rectangle
+      // Selection rectangle - IMMEDIATE updates
       if (activeTool === 'SELECTION' && selectionStart) {
         const cursorWorld = screenToWorld(pos.x, pos.y);
-        // Only update if position changed significantly (reduces flicker)
-        const distanceMoved = Math.sqrt(
-          Math.pow(cursorWorld.x - (selectionEnd?.x || selectionStart.x), 2) +
-          Math.pow(cursorWorld.y - (selectionEnd?.y || selectionStart.y), 2)
-        );
-        
-        if (distanceMoved > 0.5) { // Threshold to reduce micro-updates
-          CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
-          redrawAll(previewEnd, newSnapResult);
-        }
+        CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
+        redrawAll(previewEnd, snapResultRef.current); // Immediate redraw for selection
         return;
       }
 
-      // Check for vertex hover to toggle constraints
-      if (newSnapResult.type === 'vertex' && newSnapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
-        const vertex = newSnapResult.metadata.vertex;
+      // Check for vertex hover to toggle constraints (drawing tools only)
+      if (activeTool !== 'SELECTION' && snapResult.type === 'vertex' && snapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+        const vertex = snapResult.metadata.vertex;
         const key = getVertexKey(vertex);
         if (!hoveredVerticesRef.current.has(key)) {
           hoveredVerticesRef.current.add(key);
@@ -986,51 +1030,54 @@ const App: React.FC = () => {
 
       if (!currentStart) return;
 
-      // Line preview logic
+      // Line preview logic (drawing tools only)
       if (activeTool === 'LINE') {
         if (hysteresisActive && currentSnap?.type === 'vertex') {
           preview = currentSnap.position;
-        } else if (newSnapResult.type === 'vertex' || newSnapResult.type === 'intersection') {
-          if (newSnapResult.type === 'intersection' && newSnapResult.strength > 0.1) {
-            preview = newSnapResult.position;
-          } else if (newSnapResult.type === 'vertex') {
-            preview = newSnapResult.position;
+        } else if (snapResult.type === 'vertex' || snapResult.type === 'intersection') {
+          if (snapResult.type === 'intersection' && snapResult.strength > 0.1) {
+            preview = snapResult.position;
+          } else if (snapResult.type === 'vertex') {
+            preview = snapResult.position;
           }
         } else if (shiftHeld) {
-          const dx = cursorWorld.x - currentStart.x;
-          const dy = cursorWorld.y - currentStart.y;
+          const dx = finalPos.x - currentStart.x;
+          const dy = finalPos.y - currentStart.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
+          const nearest = nearestOrthoAngleDeg(currentStart, finalPos);
           const rad = (nearest.angle * Math.PI) / 180;
           preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
         } else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
-          const constrained = applyOrthoConstraint(currentStart, cursorWorld);
+          const constrained = applyOrthoConstraint(currentStart, finalPos);
           if (constrained) {
             preview = { x: constrained.x, y: constrained.y };
           }
         } else {
-          preview = newSnapResult.position;
+          preview = snapResult.position;
         }
 
         CommandAdapters.updatePreview(preview);
-        debouncedRedraw(preview, newSnapResult);
+        debouncedRedraw(preview, snapResultRef.current);
         return;
       }
 
-      // Rectangle preview
+      // Rectangle preview (drawing tools only)
       if (activeTool === 'RECTANGLE' && currentStart) {
-        CommandAdapters.updatePreview(cursorWorld);
-        debouncedRedraw(cursorWorld, newSnapResult);
+        CommandAdapters.updatePreview(finalPos);
+        debouncedRedraw(finalPos, snapResultRef.current);
         return;
       }
 
       CommandAdapters.updatePreview(preview);
-      debouncedRedraw(preview, newSnapResult);
-    }, 8), // 8ms throttle for overall handlers except SELECTION
+      debouncedRedraw(preview, snapResultRef.current);
+    }, 8),
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
       screenToWorld, snappingService, debouncedRedraw, previewEnd,
-      hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled, orthoTempDisabled
+      hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled, orthoTempDisabled,
+      worldToScreen, SNAP_THRESHOLD, nearestOrthoAngleDeg, applyOrthoConstraint,
+      shouldUseOrthoSnapping, getVertexKey, toggleVertexConstraint, vertexConstraints,
+      constraintTempDisabled, contextManager, redrawAll
     ]
   );
 
@@ -1039,20 +1086,24 @@ const App: React.FC = () => {
 
     if (evt.button === 0) {
       const activeLayer = layerService.getActiveLayer();
-
-      // 🎯 REPLACE: const snapResult = findSnap(pos);
-      // With inline snap calculation:
+      
+      // 🎯 FIX: Only calculate snap for drawing tools
       let snapResult: SnapResult;
-      if (!snapConfig.enabled || activeTool === 'SELECTION') {
+      
+      if (activeTool === 'SELECTION') {
+        // 🚫 SELECTION MODE: No snapping
         snapResult = {
           position: screenToWorld(pos.x, pos.y),
           type: 'none',
           strength: 0
         };
       } else {
+        // ✅ DRAWING MODE: Calculate snapping
         snapResult = snappingService.findSnap(pos, contextManager.getContext());
       }
-
+      
+      snapResultRef.current = snapResult; // Always update ref
+      
       const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
       let intersectionSnap = null;
       let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
@@ -1071,7 +1122,7 @@ const App: React.FC = () => {
         intersectionSnap = snapResult.type === 'intersection' ? snapResult.position : null;
       }
 
-      // Selection tool
+      // Selection tool - CLEAN and SIMPLE
       if (activeTool === 'SELECTION') {
         const worldPos = screenToWorld(pos.x, pos.y);
         
@@ -1114,7 +1165,7 @@ const App: React.FC = () => {
             id: `primitive-${crypto.randomUUID()}`,
             type: 'rectangle',
             data: [currentStart.x, currentStart.y, cursorWorld.x, cursorWorld.y, 
-                   lineColor.r, lineColor.g, lineColor.b, lineColor.a],
+                  lineColor.r, lineColor.g, lineColor.b, lineColor.a],
             layerId: layerService.getActiveLayerId()
           };
           
@@ -1204,6 +1255,8 @@ const App: React.FC = () => {
   };
 
   const resetTool = () => {
+    const startTime = performance.now();
+
     CommandAdapters.updateCurrentStart(null);
     CommandAdapters.updatePreview(null);
     CommandAdapters.updateSelectionRect(null, null);
@@ -1212,7 +1265,6 @@ const App: React.FC = () => {
     CommandAdapters.clearVertexConstraints();
     
     snapResultRef.current = createNoSnapResult();
-    forceUpdate();
     setHysteresisActive(false);
     setCurrentSnap(null);
     hoveredVerticesRef.current.clear();
@@ -1220,7 +1272,10 @@ const App: React.FC = () => {
     if (orthoTempDisabled) {
       setOrthoTempDisabled(false);
     }
-    redrawAll(null, createNoSnapResult());
+    redrawAll(null, snapResultRef.current);
+
+    const endTime = performance.now();
+  console.log(`🔄 resetTool executed in ${(endTime - startTime).toFixed(2)}ms`);
   };
 
   const handleThemeToggle = () => {
@@ -1303,8 +1358,8 @@ const App: React.FC = () => {
 
         <canvas
           ref={canvasRef}
-          width={canvasSize.w}
-          height={canvasSize.h}
+          width={canvasSizeRef.current.w}
+          height={canvasSizeRef.current.h}
           style={{border: "none", display: "block",
                    width: "100vw", height: "100vh", 
                    cursor: cursor}}

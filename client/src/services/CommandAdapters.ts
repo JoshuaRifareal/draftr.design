@@ -167,12 +167,17 @@ export const CommandAdapters = {
   // 🎯 SELECTION COMMANDS with type-safe error handling
   setSelection: (selectedIds: string[]) => {
     const { error } = safeSync(() => {
-      console.log('🎯 CommandAdapters.setSelection called', selectedIds);
-      
+      const startTime = performance.now();
+
       appStateStore.executeCommand('set-selection', (state: AppState) => ({
         ...state,
         selectedPrimitiveIds: selectedIds
       }));
+
+      const endTime = performance.now();
+      if (selectedIds.length === 0) {
+        console.log(`🗑️ Cleared selection in ${(endTime - startTime).toFixed(2)}ms`);
+      }
     });
 
     if (error) {

@@ -58,8 +58,8 @@ export class ThemeManager {
       selectionColor: { r: 0.0, g: 0.0, b: 1.0, a: 0.25 },
       lineColor: { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }, // White lines
       snapColor: { r: 1.0, g: 0.8, b: 0.0, a: 1.0 },
-      selectionHighlightColor: { r: 0.53, g: 0.81, b: 0.98, a: 1.0 }, // Light blue
-      selectionHandleColor: { r: 0.53, g: 0.81, b: 0.98, a: 1.0 },    // Same for handles
+      selectionHighlightColor: { r: 0.22, g: 0.58, b: 1.0, a: 1.0 }, // Light blue
+      selectionHandleColor: { r: 0.22, g: 0.58, b: 1.0, a: 1.0 },    // Same for handles
       
       cssVariables: {
         '--mainMenu-bg': '#1c1c1e',
