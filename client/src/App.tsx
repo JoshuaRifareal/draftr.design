@@ -52,7 +52,7 @@ const App: React.FC = () => {
   // Pan/zoom state
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
 
-  // NEW: USING APPSTATESTORE
+  // Centralized State Management: APPSTATESTORE
   const [appState, setAppState] = useState<AppState>(appStateStore.getState());
   const {
     primitives,
@@ -115,7 +115,6 @@ const App: React.FC = () => {
     type: 'none',
     strength: 0
   });
-  const [snapConfig] = useState({ enabled: true });
   const [hysteresisActive, setHysteresisActive] = useState(false);
   const createNoSnapResult = (): SnapResult => ({
     position: { x: 0, y: 0 },
@@ -137,9 +136,6 @@ const App: React.FC = () => {
 
   // Track hovered vertices for constraint toggling
   const hoveredVerticesRef = useRef<Set<string>>(new Set());
-
-  // Track last ESC press
-  const lastEscPressRef = useRef<number>(0);
 
   // Custom Cursor
   const [isDrawing, setIsDrawing] = useState(false);
@@ -163,10 +159,7 @@ const App: React.FC = () => {
     setGlobalCursor(newCursor);
   }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
 
-  // 🎯 PERFORMANCE: Add performance monitor
-  const performanceMonitor = useRef(new PerformanceMonitor()).current;
-
-  // 🎯 PERFORMANCE: Memoize static configs that never change
+  // Memoize ortho and grid config
   const orthoConfigMemo = useMemo(() => ({
     color: ORTHO_COLOR,
     dashPx: ORTHO_DASH_PX,
@@ -175,14 +168,13 @@ const App: React.FC = () => {
     thresholdDeg: ORTHO_THRESHOLD_DEG,
     anglesDeg: ORTHO_ANGLES_DEG,
   }), []);
-
   const gridConfigMemo = useMemo(() => ({
     color: GRID_COLOR,
     spacingMin: GRID_SPACING_MIN_PX,
     spacingMax: GRID_SPACING_MAX_PX
   }), []);
 
-  // 🎯 PERFORMANCE: Optimize redrawAll with useCallback
+  // 🎯 redrawAll with useCallback
   const redrawAll = useCallback((preview: { x: number; y: number } | null, snapResult: SnapResult) => {
     const startTime = performance.now();
     
@@ -220,61 +212,16 @@ const App: React.FC = () => {
     orthoConfigMemo,
   ]);
 
-  // 🎯 PERFORMANCE: Debounced redraw for high-frequency operations
+  // Performance optimizations
+  const performanceMonitor = useRef(new PerformanceMonitor()).current;
   const debouncedRedraw = useCallback(
     debounce((preview: { x: number; y: number } | null, snapResult: SnapResult) => {
       redrawAll(preview, snapResult);
     }, 16),
     [redrawAll]
   );
-
-  // 🎯 PERFORMANCE: Add performance state and overlay
   const [showPerformance, setShowPerformance] = useState(false);
   const [performanceMetrics, setPerformanceMetrics] = useState<PerformanceMetrics | null>(null);
-
-  // Error state
-  const [error, setError] = useState<string | null>(null);
-
-  // Error display component
-  const ErrorDisplay: React.FC<{ error: string | null; onDismiss: () => void }> = ({ error, onDismiss }) => {
-    if (!error) return null;
-
-    return (
-      <div style={{
-        position: 'fixed',
-        top: '20px',
-        right: '20px',
-        padding: '16px',
-        backgroundColor: '#fed7d7',
-        border: '1px solid #feb2b2',
-        borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-        zIndex: 10001,
-        maxWidth: '400px'
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
-          <div style={{ flex: 1 }}>
-            <strong>⚠️ Error</strong>
-            <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>{error}</p>
-          </div>
-          <button 
-            onClick={onDismiss}
-            style={{
-              background: 'none',
-              border: 'none',
-              fontSize: '18px',
-              cursor: 'pointer',
-              color: '#c53030'
-            }}
-          >
-            ×
-          </button>
-        </div>
-      </div>
-    );
-  };
-
-  // 🎯 PERFORMANCE: Performance overlay component
   const PerformanceOverlay: React.FC<{ metrics: PerformanceMetrics | null }> = ({ metrics }) => {
     if (!metrics || !showPerformance) return null;
     
@@ -311,6 +258,46 @@ const App: React.FC = () => {
         {metrics.memoryUsage && (
           <div>Memory: {metrics.memoryUsage.toFixed(2)}MB</div>
         )}
+      </div>
+    );
+  };
+
+  // Error state
+  const [error, setError] = useState<string | null>(null);
+  const ErrorDisplay: React.FC<{ error: string | null; onDismiss: () => void }> = ({ error, onDismiss }) => {
+    if (!error) return null;
+
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '20px',
+        right: '20px',
+        padding: '16px',
+        backgroundColor: '#fed7d7',
+        border: '1px solid #feb2b2',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+        zIndex: 10001,
+        maxWidth: '400px'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
+          <div style={{ flex: 1 }}>
+            <strong>⚠️ Error</strong>
+            <p style={{ margin: '8px 0 0 0', fontSize: '14px' }}>{error}</p>
+          </div>
+          <button 
+            onClick={onDismiss}
+            style={{
+              background: 'none',
+              border: 'none',
+              fontSize: '18px',
+              cursor: 'pointer',
+              color: '#c53030'
+            }}
+          >
+            ×
+          </button>
+        </div>
       </div>
     );
   };
@@ -397,13 +384,16 @@ const App: React.FC = () => {
     return { x: nx, y: ny, angle_deg: nearest.angle };
   };
 
-  // Check if orthogonal snapping should be active
+  // Orthogonal and Constraint snapping setup
   const shouldUseOrthoSnapping = () => {
     if (shiftHeld) return true;
-    return orthoSnapEnabled && !orthoTempDisabled;
+     return orthoSnapEnabled && !orthoTempDisabledRef.current;
   };
   const orthoSnapEnabledRef = useRef(orthoSnapEnabled);
   const snappingServiceRef = useRef(snappingService);
+  const orthoTempDisabledRef = useRef(false);
+  const constraintTempDisabledRef = useRef(false);
+
 
   
   ////////// INITIALIZATION \\\\\\\\\\
@@ -438,7 +428,6 @@ const App: React.FC = () => {
     };
     run();
   }, []);
-
   // Ortho and Snapping refs
   useEffect(() => {
     orthoSnapEnabledRef.current = orthoSnapEnabled;
@@ -446,7 +435,6 @@ const App: React.FC = () => {
   useEffect(() => {
     snappingServiceRef.current = snappingService;
   }, [snappingService]);
-
   // Monitor frame rate
   useEffect(() => {
     const updateMetrics = () => {
@@ -473,7 +461,6 @@ const App: React.FC = () => {
     
     return () => clearInterval(interval);
   }, [showPerformance, performanceMonitor]);
-
   // Set initial theme class on mount
   useEffect(() => {
     document.body.classList.remove('theme-dark', 'theme-light');
@@ -484,7 +471,6 @@ const App: React.FC = () => {
       document.body.classList.remove('theme-dark', 'theme-light');
     };
   }, []);
-
   // Expose services to global scope for console testing
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -663,7 +649,6 @@ const App: React.FC = () => {
       };
     }
   }, [serviceRef.current]);
-
   // Subscribe to AppStateStore changes
   useEffect(() => {
     const unsubscribe = appStateStore.subscribe((newState: AppState) => {
@@ -671,7 +656,6 @@ const App: React.FC = () => {
     });
     return unsubscribe;
   }, []);
-
   // Register lines with selection service
   useEffect(() => {
     selectionService.clearAll();
@@ -680,7 +664,6 @@ const App: React.FC = () => {
       selectionService.registerPrimitiveWithId(primitive.id, primitive.type, primitive.data, primitive.layerId);
     });
   }, [primitives]);
-
   // Snapping config update on mount
   useEffect(() => {
     snappingService.updateConfig({
@@ -691,7 +674,6 @@ const App: React.FC = () => {
       orthoAnglesDeg: ORTHO_ANGLES_DEG,
     });
   }, [orthoSnapEnabled]);
-
   // Context manager update when state changes
   useEffect(() => {
     contextManager.updateContext({
@@ -708,7 +690,6 @@ const App: React.FC = () => {
     });
   }, [primitives, vertexConstraints, activeConstraint, currentStart, shiftHeld, 
   orthoTempDisabled, constraintTempDisabled, scale, offsetX, offsetY]);
-
   // Color configuration
   useEffect(() => {
     if (serviceRef.current) {
@@ -723,7 +704,6 @@ const App: React.FC = () => {
       redrawAll(previewEnd, snapResultRef.current);
     }
   }, [canvasColor, selectionColor]);
-
   // Handle Resize
   useEffect(() => {
     const handleResize = () => {
@@ -750,9 +730,7 @@ const App: React.FC = () => {
     
     return () => window.removeEventListener("resize", handleResize);
   }, []);
-
   // Global error handlers
-  
   useEffect(() => {
     const handleGlobalError = (event: ErrorEvent) => {
       console.error('🚨 Global error caught:', event.error);
@@ -773,7 +751,6 @@ const App: React.FC = () => {
       window.removeEventListener('unhandledrejection', handleUnhandledRejection);
     };
   }, []);
-
   // Keyboard listeners
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -864,7 +841,6 @@ const App: React.FC = () => {
       window.removeEventListener("keyup", onKeyUp);
     };
   }, []);
-
   // Zoom functionality
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -894,7 +870,6 @@ const App: React.FC = () => {
     canvas.addEventListener("wheel", handleWheel, { passive: false });
     return () => canvas.removeEventListener("wheel", handleWheel);
   }, [scale, offsetX, offsetY]);
-
   // Redraw all states
   useEffect(() => {
     redrawAll(previewEnd, snapResultRef.current);
@@ -906,11 +881,12 @@ const App: React.FC = () => {
   selectionHighlightColor, selectionHandleColor]);
 
 
-  ////////// INTERACTION HANDLERS \\\\\\\\\\
 
+  ////////// INTERACTION HANDLERS \\\\\\\\\\
   const handleMouseMove = useCallback(
     throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = getMousePos(evt);
+      const cursorWorld = screenToWorld(pos.x, pos.y);
       
       // 🎯 FIX: Only calculate snap for drawing tools
       let snapResult: SnapResult;
@@ -918,81 +894,140 @@ const App: React.FC = () => {
       if (activeTool === 'SELECTION') {
         // 🚫 SELECTION MODE: No snapping needed
         snapResult = {
-          position: screenToWorld(pos.x, pos.y),
+          position: cursorWorld,
           type: 'none',
           strength: 0
         };
-        snapResultRef.current = snapResult; // Update ref but no state
+        snapResultRef.current = snapResult;
       } else {
         // ✅ DRAWING MODE: Calculate snapping
         snapResult = snappingService.findSnap(pos, contextManager.getContext());
         
-        // Hysteresis logic for drawing tools
+        // 🎯 FIXED HYSTERESIS: World-coordinate distance with vertex switching
+        let finalSnapResult = snapResult;
+
+        // 🎯 DEBUG: Log vertex detection
+        if (snapResult.type === 'vertex' && !hysteresisActive) {
+          console.log('🎯 Vertex detected:', snapResult.position, 'strength:', snapResult.strength.toFixed(2));
+        }
+
         if (hysteresisActive && currentSnap?.type === 'vertex') {
-          const cursorScreen = pos;
-          const snapScreen = worldToScreen(currentSnap.position.x, currentSnap.position.y);
-          const screenDistance = Math.sqrt(
-            Math.pow(cursorScreen.x - snapScreen.x, 2) + 
-            Math.pow(cursorScreen.y - snapScreen.y, 2)
-          );
-          const UNSNAP_THRESHOLD = SNAP_THRESHOLD * 1.5;
+          const currentVertex = currentSnap.position;
           
-          if (screenDistance <= UNSNAP_THRESHOLD) {
-            snapResult = {
-              position: currentSnap.position,
-              type: currentSnap.type,
-              metadata: { vertex: currentSnap.position },
-              strength: Math.max(0.7, 1 - (screenDistance / UNSNAP_THRESHOLD))
-            };
+          // Calculate distance in WORLD coordinates (not screen)
+          const worldDistance = Math.sqrt(
+            Math.pow(cursorWorld.x - currentVertex.x, 2) + 
+            Math.pow(cursorWorld.y - currentVertex.y, 2)
+          );
+          const UNSNAP_THRESHOLD = (SNAP_THRESHOLD / scale); // Scale-aware threshold
+          
+          console.log('🎯 Hysteresis active - distance:', worldDistance.toFixed(2), 'threshold:', UNSNAP_THRESHOLD.toFixed(2));
+          
+          if (worldDistance <= UNSNAP_THRESHOLD) {
+            // Stay locked, but check if we found a better vertex
+            if (snapResult.type === 'vertex' && snapResult.strength > currentSnap.strength) {
+              console.log('🔄 Switching to better vertex:', snapResult.position);
+              // Switch to better vertex
+              finalSnapResult = snapResult;
+              setCurrentSnap({
+                type: 'vertex',
+                position: snapResult.position,
+                strength: snapResult.strength
+              });
+            } else {
+              // Keep current vertex with updated strength
+              finalSnapResult = {
+                position: currentVertex,
+                type: 'vertex',
+                metadata: { vertex: currentVertex },
+                strength: Math.max(0.7, 1 - (worldDistance / UNSNAP_THRESHOLD))
+              };
+              console.log('🔒 Staying locked to vertex:', currentVertex);
+            }
           } else {
+            // Outside threshold - release hysteresis
+            console.log('🔓 Releasing hysteresis - too far from vertex');
             setHysteresisActive(false);
             setCurrentSnap(null);
-          }
-        }
-        
-        // Constraint state handling for drawing tools
-        if (snapResult.type === 'constraint' && snapResult.metadata?.constraint) {
-          CommandAdapters.setActiveConstraint(snapResult.metadata.constraint);
-        } else if (snapResult.type === 'intersection' && snapResult.metadata?.constraint) {
-          CommandAdapters.setActiveConstraint(snapResult.metadata.constraint);
-        } else if (snapResult.type === 'vertex') {
-          CommandAdapters.setActiveConstraint(null);
-        } else {
-          CommandAdapters.setActiveConstraint(null);
-        }
-        
-        // 🎯 FIX: Only update ref for drawing tools (no state updates)
-        const prevSnap = snapResultRef.current;
-        const hasChanged = prevSnap.type !== snapResult.type || 
-                          prevSnap.position.x !== snapResult.position.x || 
-                          prevSnap.position.y !== snapResult.position.y ||
-                          prevSnap.strength !== snapResult.strength;
-        
-        if (hasChanged) {
-          snapResultRef.current = snapResult;
-        }
-        
-        // Handle temporary disabling for drawing tools
-        if (snapResult.type === 'vertex' || hysteresisActive) {
-          if (orthoSnapEnabled && !orthoTempDisabled) {
-            setOrthoTempDisabled(true);
-          }
-          if (!constraintTempDisabled && vertexConstraints.length > 0) {
-            setConstraintTempDisabled(true);
-          }
-        } else {
-          if (orthoTempDisabled) {
+            orthoTempDisabledRef.current = false;
+            constraintTempDisabledRef.current = false;
             setOrthoTempDisabled(false);
-          }
-          if (constraintTempDisabled) {
             setConstraintTempDisabled(false);
           }
         }
+
+        // 🎯 VERTEX PRIORITY: If we found a new vertex and not in hysteresis
+        if (!hysteresisActive && finalSnapResult.type === 'vertex') {
+          console.log('🔐 Locking to new vertex:', finalSnapResult.position);
+          setHysteresisActive(true);
+          setCurrentSnap({
+            type: 'vertex', 
+            position: finalSnapResult.position,
+            strength: finalSnapResult.strength
+          });
+          // 🎯 IMMEDIATE disabling using refs
+          orthoTempDisabledRef.current = true;
+          constraintTempDisabledRef.current = true;
+          setOrthoTempDisabled(true);
+          setConstraintTempDisabled(true);
+        }
+
+        // 🎯 CRITICAL FIX: Extend visual indicator during hysteresis when snap service returns 'none'
+        if (hysteresisActive && currentSnap?.type === 'vertex' && finalSnapResult.type === 'none') {
+          const currentVertex = currentSnap.position;
+          const worldDistance = Math.sqrt(
+            Math.pow(cursorWorld.x - currentVertex.x, 2) + 
+            Math.pow(cursorWorld.y - currentVertex.y, 2)
+          );
+          const VISUAL_THRESHOLD = (SNAP_THRESHOLD / scale); // Use same threshold now
+          
+          if (worldDistance <= VISUAL_THRESHOLD) {
+            console.log('🔵 Extending snap indicator during hysteresis');
+            finalSnapResult = {
+              position: currentVertex,
+              type: 'vertex',
+              metadata: { vertex: currentVertex },
+              strength: Math.max(0.3, 1 - (worldDistance / VISUAL_THRESHOLD)) // Fade out near edge
+            };
+          }
+        }
+
+        // 🎯 FIX: Update snapResultRef with the final result (including hysteresis)
+        const shouldUpdateSnapRef = 
+          finalSnapResult.type !== snapResultRef.current.type ||
+          finalSnapResult.position.x !== snapResultRef.current.position.x ||
+          finalSnapResult.position.y !== snapResultRef.current.position.y;
+
+        if (shouldUpdateSnapRef) {
+          snapResultRef.current = finalSnapResult;
+          console.log('🔵 Snap ref updated:', finalSnapResult.type, 'at', finalSnapResult.position);
+        }
+
+        // 🎯 SIMPLIFIED: Temporary disabling now handled by hysteresis logic above
+        // Only reset if we're completely out of hysteresis
+        if (!hysteresisActive && (orthoTempDisabledRef.current || constraintTempDisabledRef.current)) {
+          orthoTempDisabledRef.current = false;
+          constraintTempDisabledRef.current = false;
+          setOrthoTempDisabled(false);
+          setConstraintTempDisabled(false);
+        }
+        
+        // Constraint state handling for drawing tools
+        if (finalSnapResult.type === 'constraint' && finalSnapResult.metadata?.constraint) {
+          CommandAdapters.setActiveConstraint(finalSnapResult.metadata.constraint);
+        } else if (finalSnapResult.type === 'intersection' && finalSnapResult.metadata?.constraint) {
+          CommandAdapters.setActiveConstraint(finalSnapResult.metadata.constraint);
+        } else if (finalSnapResult.type === 'vertex') {
+          CommandAdapters.setActiveConstraint(null);
+        } else {
+          CommandAdapters.setActiveConstraint(null);
+        }
       }
 
-      const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
+      const constraintSnap = snapResultRef.current.type === 'constraint' ? snapResultRef.current.position : null;
       let intersectionSnap = null;
-      let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
+      let finalPos = snapResultRef.current.type === 'vertex' ? snapResultRef.current.position : 
+                    intersectionSnap ?? constraintSnap ?? cursorWorld;
       let preview = finalPos;
 
       // Panning functionality
@@ -1010,15 +1045,14 @@ const App: React.FC = () => {
 
       // Selection rectangle - IMMEDIATE updates
       if (activeTool === 'SELECTION' && selectionStart) {
-        const cursorWorld = screenToWorld(pos.x, pos.y);
         CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
         redrawAll(previewEnd, snapResultRef.current); // Immediate redraw for selection
         return;
       }
 
       // Check for vertex hover to toggle constraints (drawing tools only)
-      if (activeTool !== 'SELECTION' && snapResult.type === 'vertex' && snapResult.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
-        const vertex = snapResult.metadata.vertex;
+      if (activeTool !== 'SELECTION' && snapResultRef.current.type === 'vertex' && snapResultRef.current.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+        const vertex = snapResultRef.current.metadata.vertex;
         const key = getVertexKey(vertex);
         if (!hoveredVerticesRef.current.has(key)) {
           hoveredVerticesRef.current.add(key);
@@ -1034,11 +1068,11 @@ const App: React.FC = () => {
       if (activeTool === 'LINE') {
         if (hysteresisActive && currentSnap?.type === 'vertex') {
           preview = currentSnap.position;
-        } else if (snapResult.type === 'vertex' || snapResult.type === 'intersection') {
-          if (snapResult.type === 'intersection' && snapResult.strength > 0.1) {
-            preview = snapResult.position;
-          } else if (snapResult.type === 'vertex') {
-            preview = snapResult.position;
+        } else if (snapResultRef.current.type === 'vertex' || snapResultRef.current.type === 'intersection') {
+          if (snapResultRef.current.type === 'intersection' && snapResultRef.current.strength > 0.1) {
+            preview = snapResultRef.current.position;
+          } else if (snapResultRef.current.type === 'vertex') {
+            preview = snapResultRef.current.position;
           }
         } else if (shiftHeld) {
           const dx = finalPos.x - currentStart.x;
@@ -1047,13 +1081,13 @@ const App: React.FC = () => {
           const nearest = nearestOrthoAngleDeg(currentStart, finalPos);
           const rad = (nearest.angle * Math.PI) / 180;
           preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
-        } else if (shouldUseOrthoSnapping() && !orthoTempDisabled) {
+        } else if (shouldUseOrthoSnapping() && !orthoTempDisabledRef.current) {
           const constrained = applyOrthoConstraint(currentStart, finalPos);
           if (constrained) {
             preview = { x: constrained.x, y: constrained.y };
           }
         } else {
-          preview = snapResult.position;
+          preview = snapResultRef.current.position;
         }
 
         CommandAdapters.updatePreview(preview);
@@ -1074,13 +1108,12 @@ const App: React.FC = () => {
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
       screenToWorld, snappingService, debouncedRedraw, previewEnd,
-      hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled, orthoTempDisabled,
+      hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled,
       worldToScreen, SNAP_THRESHOLD, nearestOrthoAngleDeg, applyOrthoConstraint,
       shouldUseOrthoSnapping, getVertexKey, toggleVertexConstraint, vertexConstraints,
-      constraintTempDisabled, contextManager, redrawAll
+      contextManager, redrawAll
     ]
   );
-
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
 
@@ -1222,7 +1255,6 @@ const App: React.FC = () => {
       setIsDrawing(false);
     }
   };
-
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     if (evt.button === 0) {
       setIsDrawing(false);
@@ -1232,18 +1264,15 @@ const App: React.FC = () => {
       redrawAll(previewEnd, snapResultRef.current);
     }
   };
-
   const handleContextMenu = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     evt.preventDefault();
     resetTool();
   };
-
   const handleClear = () => {
     console.log('CANVAS CLEARED');
     CommandAdapters.clearCanvas();
     resetTool();
   };
-
   const handleToolChange = (tool: string) => {
     if (!isValidToolType(tool)) {
       console.warn('⚠️ Invalid tool type:', tool);
@@ -1253,7 +1282,6 @@ const App: React.FC = () => {
     CommandAdapters.setSelection([]);
     resetTool();
   };
-
   const resetTool = () => {
     const startTime = performance.now();
 
@@ -1269,15 +1297,17 @@ const App: React.FC = () => {
     setCurrentSnap(null);
     hoveredVerticesRef.current.clear();
 
+    orthoTempDisabledRef.current = false;
+    constraintTempDisabledRef.current = false;
+
     if (orthoTempDisabled) {
       setOrthoTempDisabled(false);
     }
     redrawAll(null, snapResultRef.current);
 
     const endTime = performance.now();
-  console.log(`🔄 resetTool executed in ${(endTime - startTime).toFixed(2)}ms`);
+    console.log(`🔄 resetTool executed in ${(endTime - startTime).toFixed(2)}ms`);
   };
-
   const handleThemeToggle = () => {
     console.log('🎨 handleThemeToggle called');
     const newTheme = themeManager.getCurrentTheme() === 'dark' ? 'light' : 'dark';

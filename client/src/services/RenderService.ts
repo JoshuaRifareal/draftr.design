@@ -502,52 +502,42 @@ export class RenderService {
   private drawAdaptiveLODPrimitives(primitives: Primitive[], offsetX: number, offsetY: number, scale: number, visiblePercentage: number): void {
     // 🎯 Dynamic quality settings based on density
     let qualitySettings: {
-      minPixelSize: number;    // Skip primitives smaller than this
-      pointAlpha: number;      // Transparency for simplified points
-      lineAlpha: number;       // Transparency for lines
-      circleSegments: number;  // Quality of circles
+      minPixelSize: number;
+      pointAlpha: number;
+      lineAlpha: number;
+      circleSegments: number;
     };
 
     if (visiblePercentage > 60) {
       // 🚀 HIGH DENSITY: Very aggressive optimization
       qualitySettings = {
-        minPixelSize: 24.0,     // Skip anything < 4 pixels
-        pointAlpha: 0.3,       // Very transparent points
-        lineAlpha: 0.3,        // Transparent lines
-        circleSegments: 1      // Low quality circles
+        minPixelSize: 12.0,
+        pointAlpha: 0.3,
+        lineAlpha: 0.3,
+        circleSegments: 1
       };
     } else if (visiblePercentage > 30) {
       // 🎯 MEDIUM DENSITY: Balanced optimization
       qualitySettings = {
-        minPixelSize: 3.5,     // Skip anything < 2.5 pixels  
-        pointAlpha: 0.6,       // Semi-transparent points
-        lineAlpha: 0.8,        // Slightly transparent lines
-        circleSegments: 4      // Medium quality circles
+        minPixelSize: 3.5,
+        pointAlpha: 0.3,
+        lineAlpha: 0.3,
+        circleSegments: 4
       };
     } else {
       // ✅ LOW DENSITY: Light optimization
       qualitySettings = {
-        minPixelSize: 2.0,     // Skip anything < 2 pixels
-        pointAlpha: 0.8,       // Mostly opaque points
-        lineAlpha: 1.0,        // Full opacity lines
-        circleSegments: 8      // Good quality circles
+        minPixelSize: 2.0,
+        pointAlpha: 0.8,
+        lineAlpha: 1.0,
+        circleSegments: 8
       };
     }
 
-    // Debug logging (remove after testing)
+    // Debug logging
     if (primitives.length > 100) {
-      if (primitives.length > 100) {
-        let qualityLevel: string;
-        
-        if (visiblePercentage > 60) {
-          qualityLevel = 'LOW';
-        } else if (visiblePercentage > 30) {
-          qualityLevel = 'MEDIUM';
-        } else {
-          qualityLevel = 'HIGH';
-        }
-        console.log(`🎯 Adaptive LOD: ${visiblePercentage}% visible -> Quality: ${qualityLevel}`);
-      }
+      const qualityLevel = visiblePercentage > 60 ? 'LOW' : visiblePercentage > 30 ? 'MEDIUM' : 'HIGH';
+      console.log(`🎯 Adaptive LOD: ${visiblePercentage}% visible -> Quality: ${qualityLevel}`);
     }
 
     primitives.forEach(primitive => {
@@ -559,15 +549,24 @@ export class RenderService {
           this.drawAdaptiveRectangle(primitive, offsetX, offsetY, scale, qualitySettings);
           break;
         default:
-          // Fallback to normal drawing for unknown types
           this.drawPrimitiveNormal(primitive);
       }
     });
   }
   private drawAdaptiveLine(primitive: Primitive, offsetX: number, offsetY: number, scale: number, quality: any): void {
     const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+    let finalColor = { r, g, b, a };
+    const isLightTheme = document.body.classList.contains('theme-light');
+    let adaptiveAlpha = quality.lineAlpha;
+
+    if (isLightTheme) {
+      // Light mode: ensure visibility by adjusting alpha for white lines
+      if (r === 1 && g === 1 && b === 1) {
+        finalColor = { r: 0, g: 0, b: 0, a }; // Convert white to black
+        adaptiveAlpha = Math.min(1.0, quality.lineAlpha * 1.5); // Increase visibility in light mode
+      }
+    }
     
-    // Calculate screen space length
     const screenX1 = (x1 + offsetX) * scale;
     const screenY1 = (y1 + offsetY) * scale;
     const screenX2 = (x2 + offsetX) * scale;
@@ -577,54 +576,77 @@ export class RenderService {
       Math.pow(screenX2 - screenX1, 2) + Math.pow(screenY2 - screenY1, 2)
     );
     
-    // Skip or simplify based on quality settings
     if (screenLength < quality.minPixelSize) {
-      // Draw as simplified point
+      const pointAlpha = isLightTheme && r === 1 && g === 1 && b === 1 
+        ? Math.min(1.0, quality.pointAlpha * 1.5)
+        : quality.pointAlpha;
+        
       this.drawCircle(
         (x1 + x2) / 2, (y1 + y2) / 2,
-        quality.minPixelSize / scale * 0.3, // Smaller points at high density
-        r, g, b, a * quality.pointAlpha,
+        quality.minPixelSize / scale * 0.3,
+        finalColor.r, finalColor.g, finalColor.b, finalColor.a * pointAlpha,
         quality.circleSegments,
         false
       );
     } else {
-      // Draw line with adaptive quality
-      this.drawLine(x1, y1, x2, y2, r, g, b, a * quality.lineAlpha);
+      // Draw line with adaptive quality and theme-aware color/alpha
+      this.drawLine(x1, y1, x2, y2, 
+        finalColor.r, finalColor.g, finalColor.b, finalColor.a * adaptiveAlpha);
     }
   }
   private drawAdaptiveRectangle(primitive: Primitive, offsetX: number, offsetY: number, scale: number, quality: any): void {
     const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+    let finalColor = { r, g, b, a };
+    const isLightTheme = document.body.classList.contains('theme-light');
+    let adaptiveAlpha = quality.lineAlpha;
+
+    if (isLightTheme) {
+      // Light mode: ensure visibility by adjusting alpha for white rectangles
+      if (r === 1 && g === 1 && b === 1) {
+        finalColor = { r: 0, g: 0, b: 0, a }; // Convert white to black
+        adaptiveAlpha = Math.min(1.0, quality.lineAlpha * 1.5); // Increase visibility in light mode
+      }
+    }
     
-    // Calculate screen space size
     const screenWidth = Math.abs(x2 - x1) * scale;
     const screenHeight = Math.abs(y2 - y1) * scale;
     
     if (screenWidth < quality.minPixelSize && screenHeight < quality.minPixelSize) {
-      // Draw as point
+      const pointAlpha = isLightTheme && r === 1 && g === 1 && b === 1 
+        ? Math.min(1.0, quality.pointAlpha * 1.5) 
+        : quality.pointAlpha;
+        
       this.drawCircle(
         (x1 + x2) / 2, (y1 + y2) / 2,
         quality.minPixelSize / scale * 0.3,
-        r, g, b, a * quality.pointAlpha,
+        finalColor.r, finalColor.g, finalColor.b, finalColor.a * pointAlpha,
         quality.circleSegments,
         false
       );
     } else {
-      // Draw rectangle with adaptive quality
-      this.drawRectangle(x1, y1, x2, y2, r, g, b, a * quality.lineAlpha, false);
+      // Draw rectangle with adaptive quality and theme-aware color/alpha
+      this.drawRectangle(x1, y1, x2, y2, 
+        finalColor.r, finalColor.g, finalColor.b, finalColor.a * adaptiveAlpha, false);
     }
   }
   private drawPrimitiveNormal(primitive: Primitive): void {
-  switch (primitive.type) {
-    case 'line':
-      const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
-      this.drawLine(x1, y1, x2, y2, r, g, b, a);
-      break;
-    case 'rectangle':
-      const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
-      this.drawRectangle(rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA, false);
-      break;
+    const [x1, y1, x2, y2, r, g, b, a] = primitive.data;
+    let finalColor = { r, g, b, a };
+    const isLightTheme = document.body.classList.contains('theme-light');
+    
+    if (isLightTheme && r === 1 && g === 1 && b === 1) {
+      finalColor = { r: 0, g: 0, b: 0, a };
+    }
+    
+    switch (primitive.type) {
+      case 'line':
+        this.drawLine(x1, y1, x2, y2, finalColor.r, finalColor.g, finalColor.b, finalColor.a);
+        break;
+      case 'rectangle':
+        this.drawRectangle(x1, y1, x2, y2, finalColor.r, finalColor.g, finalColor.b, finalColor.a, false);
+        break;
+    }
   }
-}
 
 
   // Configuration methods
