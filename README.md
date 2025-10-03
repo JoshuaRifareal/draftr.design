@@ -10,7 +10,8 @@
 A performant, modern CAD application built with Rust & WebAssembly for buttery-smooth drafting in your browser.
 
 
----
+<div align="center"><h2>Try it here: https://draftr-design.vercel.app<h2></div>
+
 
 ## ✨ Features
 - **⚡ Blazing Fast** - Rust + WebAssembly core for native-like performance
