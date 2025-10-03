@@ -68,18 +68,6 @@ export const CommandBar: React.FC<CommandBarProps> = ({ onCommandSelect }) => {
       return;
     }
 
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex((selectedIndex + 1) % results.length);
-      return;
-    }
-
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex((selectedIndex - 1 + results.length) % results.length);
-      return;
-    }
-
     if ((e.key === 'Enter' || e.key === ' ') && results[selectedIndex]) {
       e.preventDefault();
       handleCommandSelect(results[selectedIndex]);

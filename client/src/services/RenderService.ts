@@ -223,10 +223,9 @@ export class RenderService {
             finalColor.r, finalColor.g, finalColor.b, finalColor.a);
         break;
         case 'rectangle':
-          // Future: rectangle rendering
-          const [rectX1, rectY1, rectX2, rectY2, rectR, rectG, rectB, rectA] = primitive.data;
-          this.drawRectangle(rectX1, rectY1, rectX2, rectY2,
-            rectR, rectG, rectB, rectA, false);
+          const [rectX1, rectY1, rectX2, rectY2] = primitive.data;
+          this.drawRectangle(rectX1, rectY1, rectX2, rectY2, 
+            finalColor.r, finalColor.g, finalColor.b, finalColor.a, false);
         break;
         // Future: other primitive types
       }
@@ -301,7 +300,7 @@ export class RenderService {
           snapColor.r, snapColor.g, snapColor.b, snapColor.a
         );
       }
-  }
+    }
 
     // Draw snap indicators (always on top)
     if (snapResult.type !== 'none') {
@@ -460,7 +459,11 @@ export class RenderService {
           const [x1, y1, x2, y2] = primitive.data;
           this.drawLine(x1, y1, x2, y2, finalColor.r, finalColor.g, finalColor.b, finalColor.a);
         break;
-        // Future: rectangle, circle, etc.
+        case 'rectangle':
+          const [rectX1, rectY1, rectX2, rectY2] = primitive.data;
+          this.drawRectangle(rectX1, rectY1, rectX2, rectY2, 
+            finalColor.r, finalColor.g, finalColor.b, finalColor.a, false);
+          break;
       }
     });
   }

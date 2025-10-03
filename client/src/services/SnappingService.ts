@@ -137,12 +137,11 @@ export class DefaultSnappingService implements ISnappingService {
     if (context.orthoTempDisabled) {
       return this.createNoSnapResult(this.screenToWorld(screenPos, context));
     }
-  
+
     let closest: { x: number; y: number } | null = null;
     let minDist = this.config.thresholdPx;
-  
+
     // Extract line data from primitives
-    // Filter for line primitives and get their data arrays
     const linePrimitives = context.primitives.filter(prim => prim.type === 'line');
     
     // Check all line endpoints in SCREEN SPACE
@@ -155,6 +154,13 @@ export class DefaultSnappingService implements ISnappingService {
       ];
       
       for (const pt of pts) {
+        // EXCLUDE the current start point from vertex snapping
+        if (context.currentStart && 
+            Math.abs(pt.x - context.currentStart.x) < 1e-5 && 
+            Math.abs(pt.y - context.currentStart.y) < 1e-5) {
+          continue; // Skip current start point
+        }
+        
         const screenPt = this.worldToScreen(pt, context);
         
         const dx = screenPt.x - screenPos.x;
@@ -167,7 +173,7 @@ export class DefaultSnappingService implements ISnappingService {
         }
       }
     }
-  
+
     if (closest) {
       const strength = 1 - (minDist / this.config.thresholdPx);
       return {
@@ -177,7 +183,7 @@ export class DefaultSnappingService implements ISnappingService {
         strength: Math.max(0, Math.min(1, strength))
       };
     }
-  
+
     return this.createNoSnapResult(this.screenToWorld(screenPos, context));
   }
 
@@ -308,70 +314,83 @@ export class DefaultSnappingService implements ISnappingService {
   }
 
   private findIntersectionSnap(screenPos: { x: number; y: number }, context: SnappingContext): SnapResult {
-    if (!context.currentStart || !context.activeConstraint) {
+    if (!context.currentStart || context.vertexConstraints.length === 0) {
       return this.createNoSnapResult(this.screenToWorld(screenPos, context));
     }
 
     const cursorWorld = this.screenToWorld(screenPos, context);
-    const nearest = this.nearestOrthoAngleDeg(context.currentStart, cursorWorld);
-
-    if (nearest.diff > this.config.orthoThresholdDeg) {
-      return this.createNoSnapResult(cursorWorld);
-    }
-
-    const intersection = this.calculateIntersection(context.currentStart, context.activeConstraint, nearest.angle);
-
-    if (!intersection) {
-      return this.createNoSnapResult(cursorWorld);
-    }
-
-    // Proximity check in screen space
-    const intersectionScreen = this.worldToScreen(intersection, context);
-    const cursorScreen = screenPos;
     
-    const dx = intersectionScreen.x - cursorScreen.x;
-    const dy = intersectionScreen.y - cursorScreen.y;
-    const screenDistance = Math.sqrt(dx * dx + dy * dy);
-    const thresholdScreen = this.config.thresholdPx;
+    let closestIntersection: { x: number; y: number } | null = null;
+    let minScreenDistance = this.config.thresholdPx;
+    let bestOrthoAngle: number | null = null;
 
-    if (screenDistance < thresholdScreen) {
-      const strength = 1 - (screenDistance / thresholdScreen);
+    // For each orthogonal angle, find intersections with constraint guides
+    for (const orthoAngle of this.config.orthoAnglesDeg) {
+      const angleRad = (orthoAngle * Math.PI) / 180;
+      const dxOrtho = Math.cos(angleRad);
+      const dyOrtho = Math.sin(angleRad);
+      
+      // For each constraint point, check intersections with horizontal/vertical guides through it
+      for (const constraint of context.vertexConstraints) {
+        // Check intersection with horizontal constraint line (y = constraint.y)
+        if (Math.abs(dyOrtho) > 1e-5) { // Avoid division by zero for horizontal lines
+          const tHorizontal = (constraint.y - context.currentStart.y) / dyOrtho;
+          if (isFinite(tHorizontal)) {
+            const xIntersect = context.currentStart.x + dxOrtho * tHorizontal;
+            const horizontalIntersection = { x: xIntersect, y: constraint.y };
+            
+            // Check if this intersection is close to the cursor
+            const intersectionScreen = this.worldToScreen(horizontalIntersection, context);
+            const screenDistance = Math.sqrt(
+              Math.pow(intersectionScreen.x - screenPos.x, 2) + 
+              Math.pow(intersectionScreen.y - screenPos.y, 2)
+            );
+            
+            if (screenDistance < minScreenDistance) {
+              minScreenDistance = screenDistance;
+              closestIntersection = horizontalIntersection;
+              bestOrthoAngle = orthoAngle;
+            }
+          }
+        }
+        
+        // Check intersection with vertical constraint line (x = constraint.x)
+        if (Math.abs(dxOrtho) > 1e-5) { // Avoid division by zero for vertical lines
+          const tVertical = (constraint.x - context.currentStart.x) / dxOrtho;
+          if (isFinite(tVertical)) {
+            const yIntersect = context.currentStart.y + dyOrtho * tVertical;
+            const verticalIntersection = { x: constraint.x, y: yIntersect };
+            
+            // Check if this intersection is close to the cursor
+            const intersectionScreen = this.worldToScreen(verticalIntersection, context);
+            const screenDistance = Math.sqrt(
+              Math.pow(intersectionScreen.x - screenPos.x, 2) + 
+              Math.pow(intersectionScreen.y - screenPos.y, 2)
+            );
+            
+            if (screenDistance < minScreenDistance) {
+              minScreenDistance = screenDistance;
+              closestIntersection = verticalIntersection;
+              bestOrthoAngle = orthoAngle;
+            }
+          }
+        }
+      }
+    }
+
+    if (closestIntersection && bestOrthoAngle !== null) {
+      const strength = 1 - (minScreenDistance / this.config.thresholdPx);
       return {
-        position: intersection,
+        position: closestIntersection,
         type: 'intersection',
-        metadata: { 
-          constraint: context.activeConstraint,
-          angleDeg: nearest.angle 
-        },
+        metadata: { angleDeg: bestOrthoAngle },
         strength: Math.max(0, Math.min(1, strength))
       };
     }
 
     return this.createNoSnapResult(cursorWorld);
   }
-
-  private calculateIntersection(
-    start: { x: number; y: number }, 
-    constraint: { x: number; y: number; type: 'horizontal' | 'vertical' },
-    orthoAngleDeg: number
-  ): { x: number; y: number } | null {
-    const angleRad = (orthoAngleDeg * Math.PI) / 180;
-    const m = Math.tan(angleRad);
-    const b = start.y - m * start.x;
-    
-    if (constraint.type === 'horizontal') {
-      return {
-        x: (constraint.y - b) / m,
-        y: constraint.y
-      };
-    } else {
-      return {
-        x: constraint.x,
-        y: m * constraint.x + b
-      };
-    }
-  }
-
+  
   worldToScreen(worldPos: { x: number; y: number }, context: SnappingContext): { x: number; y: number } {
     const screenX = (worldPos.x + context.offsetX) * context.scale;
     const screenY = (worldPos.y + context.offsetY) * context.scale;

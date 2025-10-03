@@ -82,14 +82,15 @@ export const useCommandBar = (): UseCommandBarReturn => {
       if (isOpen) {
         switch (e.key) {
           case 'ArrowDown':
+            console.log("Arrow down from commandbar")
             e.preventDefault();
             setSelectedIndex(prev => (prev + 1) % results.length);
-            break;
+          break;
           case 'ArrowUp':
+            console.log("Arrow up from commandbar")
             e.preventDefault();
             setSelectedIndex(prev => (prev - 1 + results.length) % results.length);
-            break;
-          // 🎯 REMOVED: ESC case - handled above
+          break;
         }
       }
     };
