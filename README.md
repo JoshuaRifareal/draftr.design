@@ -4,6 +4,10 @@
 **Precision CAD, reimagined for the web.**  
 A performant, modern CAD application built with Rust & WebAssembly for buttery-smooth drafting in your browser.
 
+![](https://img.shields.io/github/stars/pandao/editor.md.svg) ![](https://img.shields.io/github/forks/pandao/editor.md.svg) ![](https://img.shields.io/github/tag/pandao/editor.md.svg) ![](https://img.shields.io/github/release/pandao/editor.md.svg) ![](https://img.shields.io/github/issues/pandao/editor.md.svg) ![](https://img.shields.io/bower/v/editor.md.svg)
+
+---
+Try it here: https://draftr-design.vercel.app
 ---
 
 ## ✨ Features
