@@ -21,6 +21,23 @@ export const CommandAdapters = {
     const { error } = safeSync(() => {
       console.log('🎯 CommandAdapters.drawLine called', primitive.id);
       
+      // 🎯 FIX: Check if we have an active layer to draw on
+      const activeLayer = layerService.getActiveLayer();
+      if (!activeLayer) {
+        throw new Error('No active layer - cannot draw');
+      }
+      
+      // 🎯 FIX: Check if active layer is actually a layer (not group/block)
+      if (activeLayer.type !== 'layer') {
+        throw new Error(`Cannot draw on ${activeLayer.type} - only on layers`);
+      }
+
+      // 🎯 FIX: Validate that the layer still exists in LayerService
+      const layerExists = layerService.getLayer(activeLayer.id);
+      if (!layerExists) {
+        throw new Error(`Active layer no longer exists: ${activeLayer.id}`);
+      }
+
       if (!primitive.id) {
         throw new Error('Primitive ID is required');
       }
@@ -30,19 +47,14 @@ export const CommandAdapters = {
       }
 
       appStateStore.executeCommand('draw-line', (state: AppState) => {
-        // Assign to current layer
-        const layerId = primitive.layerId || layerService.getActiveLayerId();
+        // 🎯 FIX: Always use active layer, ignore primitive.layerId
+        const layerId = activeLayer.id;
         const primitiveWithLayer = { ...primitive, layerId };
         
-        console.log('➕ Adding primitive to layer:', layerId);
+        console.log('➕ Adding primitive to active layer:', layerId);
         
-        // 🎯 Handle layer assignment errors gracefully
-        try {
-          layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
-        } catch (layerError) {
-          console.warn(`⚠️ Could not assign primitive to layer, continuing without layer:`, getErrorMessage(layerError));
-          // Continue with orphaned primitive rather than failing the entire operation
-        }
+        // Assign to active layer
+        layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
         
         return {
           ...state,
@@ -63,8 +75,26 @@ export const CommandAdapters = {
     const { error } = safeSync(() => {
       console.log('🎯 CommandAdapters.drawRectangle called', primitive.id);
       
+      // 🎯 FIX: Check if we have an active layer to draw on
+      const activeLayer = layerService.getActiveLayer();
+      if (!activeLayer) {
+        throw new Error('No active layer - cannot draw');
+      }
+      
+      // 🎯 FIX: Check if active layer is actually a layer (not group/block)
+      if (activeLayer.type !== 'layer') {
+        throw new Error(`Cannot draw on ${activeLayer.type} - only on layers`);
+      }
+
+      // 🎯 FIX: Validate that the layer still exists in LayerService
+      const layerExists = layerService.getLayer(activeLayer.id);
+      if (!layerExists) {
+        throw new Error(`Active layer no longer exists: ${activeLayer.id}`);
+      }
+      
       appStateStore.executeCommand('draw-rectangle', (state: AppState) => {
-        const layerId = primitive.layerId || layerService.getActiveLayerId();
+        // 🎯 FIX: Always use active layer, ignore primitive.layerId
+        const layerId = activeLayer.id;
         const primitiveWithLayer = { ...primitive, layerId };
         
         layerService.assignPrimitiveToLayer(primitiveWithLayer.id, layerId);
@@ -239,11 +269,22 @@ export const CommandAdapters = {
       console.log('🎯 CommandAdapters.clearCanvas called');
       
       appStateStore.executeCommand('clear-canvas', (state: AppState) => {
-        // Clear layer assignments
+        // 🎯 FIX: Clear layer assignments directly
         console.log('🗑️ Clearing primitives from layers');
         state.primitives.forEach(primitive => {
-          layerService.assignPrimitiveToLayer(primitive.id, null);
+          // Remove from layer directly
+          if (primitive.layerId) {
+            const layer = layerService.getLayer(primitive.layerId);
+            if (layer && layer.primitiveIds.has(primitive.id)) {
+              layer.primitiveIds.delete(primitive.id);
+            }
+          }
         });
+        
+        // Clear selection service directly
+        if (typeof (window as any).selectionService !== 'undefined') {
+          (window as any).selectionService.clearAll();
+        }
         
         return {
           ...state,
@@ -266,15 +307,22 @@ export const CommandAdapters = {
       appStateStore.executeCommand('delete-selected', (state: AppState) => {
         // Remove from layers
         selectedIds.forEach(id => {
-          layerService.assignPrimitiveToLayer(id, null);
+          const primitive = state.primitives.find(p => p.id === id);
+          if (primitive && primitive.layerId) {
+            const layer = layerService.getLayer(primitive.layerId);
+            if (layer && layer.primitiveIds.has(id)) {
+              layer.primitiveIds.delete(id);
+            }
+          }
         });
         
+        // 🎯 FIX: Actually remove primitives from state, not just from layers
         const newPrimitives = state.primitives.filter(p => !selectedIds.includes(p.id));
         console.log(`🗑️ Deleted ${selectedIds.length} primitives, ${newPrimitives.length} remaining`);
         
         return {
           ...state,
-          primitives: newPrimitives,
+          primitives: newPrimitives, // 🎯 This is the key fix!
           selectedPrimitiveIds: []
         };
       });

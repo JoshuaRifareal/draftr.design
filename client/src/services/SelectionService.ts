@@ -107,13 +107,21 @@ export class SelectionService {
 
   unregisterPrimitive(id: string): void {
     this.safeOperation('unregisterPrimitive', () => {
-      // 🎯 PERFORMANCE: Clear cache when primitives change
+      // 🎯 FIX: Clear cache when primitives change
       this.clearCache();
       
       const primitive = this.primitives.get(id);
+      
+      // 🎯 FIX: Remove from layer WITHOUT calling LayerService (breaks circular dependency)
       if (primitive && primitive.layerId) {
-          layerService.assignPrimitiveToLayer(id, null);
+        // Direct layer removal without service call
+        const layer = layerService.getLayer(primitive.layerId);
+        if (layer && layer.primitiveIds.has(id)) {
+          layer.primitiveIds.delete(id);
+        }
       }
+      
+      // Remove from primitives map
       this.primitives.delete(id);
     }, { id });
   }
@@ -162,7 +170,6 @@ export class SelectionService {
   selectByRectangle(rectStart: Point, rectEnd: Point, 
                    existingSelection: string[] = []): SelectionResult {
     return this.safeOperation('selectByRectangle', () => {
-      // 🎯 PERFORMANCE: Cache key for rectangle selection
       const cacheKey = `rect_${rectStart.x},${rectStart.y}_${rectEnd.x},${rectEnd.y}_${existingSelection.join(',')}`;
       
       if (this.selectionCache.has(cacheKey)) {
@@ -171,9 +178,8 @@ export class SelectionService {
 
       const selectedIds = new Set<string>(existingSelection);
       const isLeftToRight = rectEnd.x >= rectStart.x;
-      const selectionMode: 'intersection' | 'containment' = isLeftToRight ? 'containment' : 'intersection'; // 🎯 FIX: Explicitly type this
+      const selectionMode: 'intersection' | 'containment' = isLeftToRight ? 'containment' : 'intersection';
       
-      // 🎯 FIX: Replace process.env check with a simple development flag
       const isDevelopment = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       if (isDevelopment) {
         console.log(`Selection mode: ${selectionMode} (${isLeftToRight ? 'L→R' : 'R→L'})`);
@@ -185,7 +191,10 @@ export class SelectionService {
         }
 
         if (this.isPrimitiveInRectangle(primitive, rectStart, rectEnd, selectionMode)) {
-          selectedIds.add(id);
+          // 🎯 FIX: Only add to selection if the primitive is editable (not locked)
+          if (this.isPrimitiveEditable(primitive)) {
+            selectedIds.add(id);
+          }
 
           const layer = primitive.layerId ? layerService.getLayer(primitive.layerId) : null;
           if (isDevelopment) {
@@ -198,12 +207,11 @@ export class SelectionService {
         console.log(`Total selected: ${selectedIds.size}`);
       }
 
-      const result: SelectionResult = { // 🎯 FIX: Explicitly type the result
+      const result: SelectionResult = {
         selectedIds: Array.from(selectedIds),
         selectionMode
       };
 
-      // 🎯 Cache the result
       this.selectionCache.set(cacheKey, result);
       this.scheduleCacheClear();
 
@@ -252,19 +260,41 @@ export class SelectionService {
 
   movePrimitivesToLayer(primitiveIds: string[], targetLayerId: string | null): boolean {
     return this.safeOperation('movePrimitivesToLayer', () => {
+      // 🎯 FIX: If targetLayerId is null, DELETE the primitives (no orphans)
+      if (targetLayerId === null) {
+        this.deletePrimitives(primitiveIds);
+        console.log(`🗑️ Deleted ${primitiveIds.length} primitives (no target layer)`);
+        return true;
+      }
+      
       let success = true;
       
       primitiveIds.forEach(primitiveId => {
         const primitive = this.primitives.get(primitiveId);
         if (primitive) {
+          // 🎯 FIX: Update layer reference directly
+          const previousLayerId = primitive.layerId;
           primitive.layerId = targetLayerId;
-          if (!layerService.assignPrimitiveToLayer(primitiveId, targetLayerId)) {
+          
+          // Update layer assignments directly (no service call)
+          if (previousLayerId) {
+            const previousLayer = layerService.getLayer(previousLayerId);
+            if (previousLayer && previousLayer.primitiveIds.has(primitiveId)) {
+              previousLayer.primitiveIds.delete(primitiveId);
+            }
+          }
+          
+          const targetLayer = layerService.getLayer(targetLayerId);
+          if (targetLayer && targetLayer.type === 'layer') {
+            targetLayer.primitiveIds.add(primitiveId);
+          } else {
             success = false;
+            console.warn(`⚠️ Cannot assign primitive to ${targetLayer?.type}`);
           }
         }
       });
 
-      console.log(`🔄 Moved ${primitiveIds.length} primitives to layer: ${targetLayerId || 'orphaned'}`);
+      console.log(`🔄 Moved ${primitiveIds.length} primitives to layer: ${targetLayerId}`);
       return success;
     }, { primitiveIds, targetLayerId });
   }
@@ -326,14 +356,26 @@ export class SelectionService {
     const layer = layerService.getLayer(primitive.layerId);
     if (!layer) return false;
     
-    if (layer.properties.locked) {
-        return true;
-    }
-    if (!layer.properties.visible) {
+    // 🎯 FIX: Use EFFECTIVE properties (with inheritance)
+    const effectiveProps = layerService.getEffectiveProperties(primitive.layerId);
+    
+    // 🎯 FIX: Only skip if HIDDEN (locked layers should still be visible but not selectable)
+    if (!effectiveProps.visible) {
         return true;
     }
     
     return false;
+  }
+
+  private isPrimitiveEditable(primitive: Primitive): boolean {
+    if (!primitive.layerId) return true;
+    
+    const layer = layerService.getLayer(primitive.layerId);
+    if (!layer) return true;
+    
+    // 🎯 Use effective properties for lock check
+    const effectiveProps = layerService.getEffectiveProperties(primitive.layerId);
+    return !effectiveProps.locked;
   }
 
   getPrimitivesByType(type: Primitive['type']): Primitive[] {

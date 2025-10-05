@@ -141,11 +141,27 @@ export class RenderService {
     const allPrimitives = selectionService.getAllPrimitives();
     const viewportBounds = this.getViewportBounds(offsetX, offsetY, scale);
     
+    // 🎯 FIX: Only filter by VISIBILITY, locked primitives should still be drawn
+    const visiblePrimitives = allPrimitives.filter(primitive => {
+      if (!primitive.layerId) return true; // Orphaned primitives (shouldn't exist anymore)
+      
+      const layer = layerService.getLayer(primitive.layerId);
+      if (!layer) return false;
+      
+      // 🎯 FIX: Only skip if HIDDEN, locked layers should still be visible
+      const effectiveProps = layerService.getEffectiveProperties(primitive.layerId);
+      if (!effectiveProps.visible) {
+        return false;
+      }
+      
+      return this.shouldRenderPrimitive(primitive, viewportBounds);
+    });
+
     // 🎯 LOD: Decide whether to use simplified rendering
     const useLOD = scale < this.LOD_THRESHOLD;
     
     // Group primitives by layer for efficient rendering
-    const primitivesByLayer = this.groupPrimitivesByLayer(allPrimitives);
+    const primitivesByLayer = this.groupPrimitivesByLayer(visiblePrimitives);
     const filteredPrimitivesByLayer = new Map<string, Primitive[]>();
     
     let visiblePrimitiveCount = 0;

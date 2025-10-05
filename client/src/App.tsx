@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
-import ReactDOM from 'react-dom';
 import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
 import { RenderService } from './services/RenderService';
@@ -8,7 +7,7 @@ import type { SnapResult } from './services/SnappingService';
 import type { SnapType } from './types/ToolTypes.js';
 import { ThemeManager, type Theme } from './services/ThemeManager';
 import { selectionService } from './services/SelectionService';
-import { layerService } from './services/LayerService';
+import { layerService, type Layer } from './services/LayerService';
 import { appStateStore, type AppState } from './services/AppStateStore';
 import { CommandAdapters } from './services/CommandAdapters';
 import type { DrawingPrimitive } from './types/DraftrTypes';
@@ -482,7 +481,7 @@ const App: React.FC = () => {
       (window as any).CommandAdapters = CommandAdapters;
       (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
       
-      // 🎯 PERFORMANCE: Add performance testing
+      // Performance testing
       (window as any).testPerformance = () => {
         console.log('🧪 Testing Performance...');
         
@@ -554,7 +553,7 @@ const App: React.FC = () => {
         return true;
       };
 
-      ////////// TEST CULLING
+      // Culling tests
       (window as any).testPerformanceLines = (count: number = 300) => {
         console.log(`🧪 Drawing ${count} random test lines...`);
         
@@ -647,6 +646,73 @@ const App: React.FC = () => {
         
         console.log('\n🎉 Performance test completed');
       };
+
+      // Layer service tests
+      (window as any).testEnhancedLayerPanel = () => {
+        console.log('🧪 Testing Enhanced LayerPanel...');
+        
+        // Test 1: Create different layer types
+        const layer1 = layerService.createLayer('Drawing Layer');
+        const layer2 = layerService.createLayer('Another Layer');
+        
+        // Test 2: Create a group
+        const group = layerService.createLayer('My Group', 'group');
+        const childLayer = layerService.createLayer('Child Layer', 'layer', group.id);
+        
+        // Test 3: Test property inheritance
+        layerService.updateLayerProperties(group.id, { 
+          color: { r: 1, g: 0, b: 0, a: 1 },
+          opacity: 0.8 
+        });
+        
+        console.log('Group properties updated');
+        
+        // Test 4: Create a block
+        const blockId = layerService.createBlockFromLayers([layer1.id, layer2.id], 'TestBlock');
+        console.log('Block created:', blockId);
+        
+        // Test 5: Test layer operations
+        console.log('Available operations:');
+        console.log('- Click layers to select');
+        console.log('- Double-click to set active');
+        console.log('- Ctrl+Click for multi-select');
+        console.log('- Shift+Click for range select');
+        console.log('- Right-click for context menu');
+        
+        return true;
+      };
+      (window as any).getLayerDebugInfo = (layerId?: string) => {
+        if (layerId) {
+          const layer = layerService.getLayer(layerId);
+          const effective = layerService.getEffectiveProperties(layerId);
+          return { layer, effective };
+        }
+        
+        return {
+          allLayers: layerService.getAllLayers(),
+          hierarchy: layerService.getLayerHierarchy(),
+          activeLayer: layerService.getActiveLayer()
+        };
+      };
+
+      //  Block deletion test
+      (window as any).testBlockDeletion = () => {
+        console.log('🧪 Testing Block Deletion...');
+        
+        // Create a test block first
+        const layer1 = layerService.createLayer('Test Layer 1');
+        const layer2 = layerService.createLayer('Test Layer 2');
+        
+        const blockId = layerService.createBlockFromLayers([layer1.id, layer2.id], 'Test Block');
+        console.log('✅ Test block created:', blockId);
+        
+        // Try to delete the block
+        setTimeout(() => {
+          console.log('🗑️ Attempting to delete block...');
+          const success = layerService.deleteLayer(blockId);
+          console.log('Block deletion result:', success);
+        }, 1000);
+      };
     }
   }, [serviceRef.current]);
   // Subscribe to AppStateStore changes
@@ -656,6 +722,40 @@ const App: React.FC = () => {
     });
     return unsubscribe;
   }, []);
+  // Subscribe to LayerService changes for automatic redraw
+  useEffect(() => {
+    const eventTypes = layerService.getEventTypes();
+    
+    const unsubscribeLayersChanged = layerService.subscribe(
+      eventTypes.LAYERS_CHANGED, 
+      () => {
+        console.log('🔄 Layer change - triggering redraw');
+        redrawAll(previewEnd, snapResultRef.current);
+      }
+    );
+
+    const unsubscribePropertiesChanged = layerService.subscribe(
+      eventTypes.LAYER_PROPERTIES_CHANGED,
+      () => {
+        console.log('🎨 Layer property change - triggering redraw');
+        redrawAll(previewEnd, snapResultRef.current);
+      }
+    );
+
+    const unsubscribeActiveLayerChanged = layerService.subscribe(
+      eventTypes.ACTIVE_LAYER_CHANGED,
+      () => {
+        console.log('🎯 Active layer change - triggering redraw');
+        redrawAll(previewEnd, snapResultRef.current);
+      }
+    );
+
+    return () => {
+      unsubscribeLayersChanged();
+      unsubscribePropertiesChanged();
+      unsubscribeActiveLayerChanged();
+    };
+  }, [redrawAll, previewEnd]);
   // Register lines with selection service
   useEffect(() => {
     selectionService.clearAll();
@@ -1116,10 +1216,31 @@ const App: React.FC = () => {
 
       // Set drawing state for non-selection tools
       if (activeTool !== 'SELECTION') {
-        if (activeLayer && activeLayer.properties.locked) {
-          console.log('🚫 Cannot draw on locked layer');
+        if (!activeLayer) {
+          console.warn('🚫 No active layer - cannot draw');
           return;
         }
+        
+        // 🎯 FIX: Only allow drawing on actual LAYERS (not groups/blocks)
+        if (activeLayer.type !== 'layer') {
+          console.warn(`🚫 Cannot draw on ${activeLayer.type} - only on layers`);
+          return;
+        }
+        
+        // 🎯 FIX: Validate layer still exists
+        const layerExists = layerService.getLayer(activeLayer.id);
+        if (!layerExists) {
+          console.warn('🚫 Active layer no longer exists');
+          return;
+        }
+        
+        // 🎯 FIX: Use EFFECTIVE properties to check if layer is locked
+        const effectiveProps = layerService.getEffectiveProperties(activeLayer.id);
+        if (effectiveProps.locked) {
+          console.warn('🚫 Cannot draw on locked layer:', activeLayer.name);
+          return;
+        }
+        
         setIsDrawing(true);
       }
 

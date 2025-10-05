@@ -1,0 +1,202 @@
+/*<<<<<<<<< Color Palette >>>>>>>>*/
+
+.color-palette-popover {
+  background: var(--panelBody-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px var(--shadow-color);
+  padding: 8px;
+}
+
+.color-palette-grid {
+  display: flex;
+  gap: 4px;
+}
+
+.color-palette-swatch {
+  width: 18px;
+  height: 18px;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.color-palette-swatch:hover {
+  transform: scale(1.1);
+  border-color: var(--text-primary);
+}
+
+.color-palette-swatch.selected {
+  box-shadow: 0 0 0 1px var(--panelBody-bg), 0 0 0 3px #5f51ff;
+}
+
+.color-palette-custom {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: var(--toolButton-bg);
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.15s ease;
+}
+
+.color-palette-custom:hover {
+  border-color: #5f51ff;
+  background: var(--toolButton-active-bg);
+  transform: scale(1.1);
+}
+
+.color-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 2px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.1);
+  box-shadow: 0 0 0 2px #5f51ff;
+}
+
+
+
+/*<<<<<<<<< Color Picker >>>>>>>>*/
+
+.color-picker-popover {
+  background: var(--panelBody-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 4px 20px var(--shadow-color);
+  padding: 12px;
+  min-width: 200px;
+}
+
+.color-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.color-picker-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  padding: 0;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.color-picker-close:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+.color-picker-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* React Colorful Customization */
+.react-colorful {
+  width: 100% !important;
+  height: 120px !important;
+}
+
+.react-colorful__pointer {
+  width: 14px !important;
+  height: 14px !important;
+  border-radius: 50%;
+}
+
+.react-colorful__saturation {
+  border-radius: 4px;
+}
+
+.react-colorful__hue {
+  border-radius: 4px;
+  height: 12px !important;
+}
+
+.hex-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hex-input-container label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.hex-input-wrapper {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.hex-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--inputArea-bg);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.hex-input:focus {
+  outline: none;
+  border-color: #5f51ff;
+}
+
+.hex-cancel:hover {
+  background: var(--toolButton-active-bg);
+}
+
+.color-picker-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.color-picker-cancel {
+  background: var(--toolButton-bg);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.color-picker-apply {
+  background: #5f51ff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #fff;
+  cursor: pointer;
+}
