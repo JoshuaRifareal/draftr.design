@@ -1,9 +1,7 @@
 <p align="center">
-  <img src="./client/src/assets/joshuarifareal_logo_light.png" width="80px" aspect-ratio="1/1" alt="Twinkle Tray brightness slider logo">
+  <img src="./client/src/assets/joshuarifareal_logo_light.png" width="80px" aspect-ratio="1/1" alt="joshuarifareal logo">
 <h1 align="center">draftr.design</h1>
 </p>
-
-<p align="center"><a href="https://github.com/xanderfrangos/twinkle-tray/releases" target="_blank"><img src="https://img.shields.io/github/v/release/xanderfrangos/twinkle-tray" alt="Latest release" /></a> <a href="https://github.com/xanderfrangos/twinkle-tray/releases" target="_blank"><img src="https://img.shields.io/github/downloads/xanderfrangos/twinkle-tray/total" alt="Total downloads" /></a> <a href="https://hosted.weblate.org/projects/twinkle-tray/twinkle-tray/" target="_blank"><img src="https://hosted.weblate.org/widgets/twinkle-tray/-/twinkle-tray/svg-badge.svg" alt="Translations" /></a></p>
 
 
 **Precision CAD, reimagined for the web.**  
