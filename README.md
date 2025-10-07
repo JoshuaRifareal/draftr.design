@@ -5,7 +5,7 @@
 
 
 **Precision CAD, reimagined for the web.**  
-A performant, modern CAD application built with Rust & WebAssembly for buttery-smooth drafting in your browser.
+A performant, modern CAD application built with Rust & WebAssembly for buttery-smooth drafting in your browser (no installation needed!).
 
 
 <div align="center"><h2>Try it here: https://draftr-design.vercel.app<h2></div>
