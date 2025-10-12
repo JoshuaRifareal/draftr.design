@@ -52,7 +52,7 @@ export class RenderService {
   private canvas: HTMLCanvasElement;
   private selectionHighlightColor = { r: 0.22, g: 0.58, b: 1.0, a: 1.0 }; // Default
   private selectionHandleColor = { r: 0.22, g: 0.58, b: 1.0, a: 1.0 };    // Default
-  private readonly LOD_THRESHOLD = 0.35; /* <--- Zoom level */
+  private readonly LOD_THRESHOLD = 0.15; /* <--- Zoom level */
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);

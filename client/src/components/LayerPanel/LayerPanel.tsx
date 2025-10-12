@@ -28,6 +28,11 @@ interface LayerItemProps {
   isSelected: boolean;
   isHovered: boolean;
   autoEditLayerId: string | null;
+  isExpanded: boolean;
+  isDragging: boolean;
+  isDragged: boolean;
+  dropPosition: DropPosition | null;
+  dragCounter?: number;
   onSelect: (layerId: string, event: React.MouseEvent) => void;
   onActivate: (layerId: string) => void;
   onHover: (layerId: string | null) => void;
@@ -35,6 +40,23 @@ interface LayerItemProps {
   onContextMenu: (layerId: string, event: React.MouseEvent) => void;
   onEditComplete: () => void;
   onColorSwatchClick: (layerId: string, position: { x: number; y: number }) => void;
+  onDragStart: (layerId: string, event: React.DragEvent) => void;
+  onDragOver: (layerId: string, event: React.DragEvent) => void;
+  onDragLeave: (event: React.DragEvent) => void;
+  onDrop: (layerId: string, event: React.DragEvent) => void;
+  onDragEnd: (event: React.DragEvent) => void;
+}
+
+interface DragState {
+  isDragging: boolean;
+  draggedIds: string[];
+  startY: number;
+  currentY: number;
+}
+
+interface DropPosition {
+  targetId: string;
+  position: 'above' | 'below' | 'inside';
 }
 
 const LayerItem: React.FC<LayerItemProps> = ({
@@ -44,13 +66,23 @@ const LayerItem: React.FC<LayerItemProps> = ({
   isSelected,
   isHovered,
   autoEditLayerId,
+  isExpanded,
+  isDragging,
+  isDragged,
+  dropPosition,
+  dragCounter,
   onSelect,
   onActivate,
   onHover,
   onToggleExpand,
   onContextMenu,
   onEditComplete,
-  onColorSwatchClick
+  onColorSwatchClick,
+  onDragStart,
+  onDragOver,
+  onDragLeave,
+  onDrop,
+  onDragEnd
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(layer.properties.name);
@@ -59,6 +91,10 @@ const LayerItem: React.FC<LayerItemProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const opacityInputRef = useRef<HTMLInputElement>(null);
   const colorSwatchRef = useRef<HTMLDivElement>(null);
+  const isDropAbove = dropPosition?.position === 'above';
+  const isDropBelow = dropPosition?.position === 'below';
+  const isDropInside = dropPosition?.position === 'inside';
+  const effectiveExpanded = isExpanded;
 
   const effectiveProperties = layerService.getEffectiveProperties(layer.id);
   const primitiveCount = layerService.getPrimitivesByLayer(layer.id).length;
@@ -133,8 +169,12 @@ const LayerItem: React.FC<LayerItemProps> = ({
         ${effectiveProperties.locked ? 'locked' : ''}
         ${layer.type !== 'layer' ? 'non-activatable' : ''}
         type-${layer.type}
+        ${isDragged ? 'dragging' : ''}
+        ${isDropAbove ? 'drop-above' : ''}
+        ${isDropBelow ? 'drop-below' : ''}
+        ${isDropInside ? 'drop-inside' : ''}
       `}
-      style={{ paddingLeft: `${depth * 12 + 8}px` }}
+      style={{ paddingLeft: `${depth + 8}px` }}
       onClick={(e) => onSelect(layer.id, e)}
       onDoubleClick={() => {
         if (layer.type === 'layer') {
@@ -144,8 +184,25 @@ const LayerItem: React.FC<LayerItemProps> = ({
       onMouseEnter={() => onHover(layer.id)}
       onMouseLeave={() => onHover(null)}
       onContextMenu={(e) => onContextMenu(layer.id, e)}
+      draggable={true}
+      onDragStart={(e) => onDragStart(layer.id, e)}
+      onDragOver={(e) => onDragOver(layer.id, e)}
+      onDragLeave={onDragLeave}
+      onDrop={(e) => onDrop(layer.id, e)}
+      onDragEnd={onDragEnd}
       title={`${layer.properties.name} (${layer.type}) - ${primitiveCount} primitives`}
     >
+      {/* Drag Handle */}
+      {layer.id !== 'Default' && (
+        <div 
+          className="drag-handle"
+          onClick={(e) => e.stopPropagation()}
+          title="Drag to reorder"
+        >
+          ⠿
+        </div>
+      )}
+      
       {/* Expand/Collapse toggle for groups/blocks */}
       {hasChildren && (
         <button
@@ -155,7 +212,7 @@ const LayerItem: React.FC<LayerItemProps> = ({
             onToggleExpand(layer.id);
           }}
         >
-          {layer.properties.expanded ? <CollapseIcon /> : <ExpandIcon />}
+          {effectiveExpanded ? <CollapseIcon /> : <ExpandIcon />}
         </button>
       )}
 
@@ -232,7 +289,6 @@ const LayerItem: React.FC<LayerItemProps> = ({
         className="color-swatch"
         style={{
           backgroundColor: `rgba(${Math.round(effectiveProperties.color.r * 255)}, ${Math.round(effectiveProperties.color.g * 255)}, ${Math.round(effectiveProperties.color.b * 255)}, ${effectiveProperties.color.a})`,
-          border: `2px solid ${isActive ? '#5f51ff' : isSelected ? '#888' : 'transparent'}`
         }}
         onClick={handleColorSwatchClick}
         title="Click to change color"
@@ -300,9 +356,39 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [originalColor, setOriginalColor] = useState<{ r: number; g: number; b: number; a: number } | null>(null);
   const [palettePosition, setPalettePosition] = useState({ x: 0, y: 0 });
+  
+  const [expandedState, setExpandedState] = useState<Map<string, boolean>>(new Map());
+  useEffect(() => {
+      const newExpandedState = new Map(expandedState); // Keep existing state
+      
+      const initializeExpandedState = (layerList: Layer[]) => {
+          layerList.forEach(layer => {
+              // Only initialize if not already in state
+              if (!newExpandedState.has(layer.id)) {
+                  newExpandedState.set(layer.id, layer.properties.expanded ?? true);
+              }
+              if (layer.children.length > 0) {
+                  initializeExpandedState(layer.children);
+              }
+          });
+      };
+      
+      initializeExpandedState(layers);
+      setExpandedState(newExpandedState);
+  }, [layers]);
 
   // Ref for the panel to detect clicks outside
   const panelRef = useRef<HTMLDivElement>(null);
+
+  // Drag & Drop state
+  const [dragState, setDragState] = useState<DragState>({
+    isDragging: false,
+    draggedIds: [],
+    startY: 0,
+    currentY: 0
+  });
+  const [dropPosition, setDropPosition] = useState<DropPosition | null>(null);
+  const [isDragOverPanel, setIsDragOverPanel] = useState(false);
 
   // Predefined colors (black is theme-aware)
   const getBlackWhiteColor = () => {
@@ -466,6 +552,35 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
     }
   };
 
+  // Handle selecting all primitives in a layer
+  const handleSelectAllPrimitives = (layerId: string) => {
+    console.log('🎯 Selecting all primitives in layer:', layerId);
+    
+    const layer = layerService.getLayer(layerId);
+    if (!layer) {
+      console.warn('🚫 Layer not found:', layerId);
+      return;
+    }
+
+    // Get all primitive IDs from this layer
+    const primitiveIds = layerService.getPrimitivesByLayer(layerId);
+    
+    if (primitiveIds.length === 0) {
+      console.log('ℹ️ No primitives found in layer:', layerId);
+      return;
+    }
+
+    console.log(`🎯 Found ${primitiveIds.length} primitives to select`);
+
+    // Use CommandAdapters to set the selection
+    if (typeof (window as any).CommandAdapters !== 'undefined') {
+      (window as any).CommandAdapters.setSelection(primitiveIds);
+      console.log('✅ Selection updated via CommandAdapters');
+    } else {
+      console.error('🚫 CommandAdapters not available');
+    }
+  };
+
   // Handle context menu
   const handleContextMenu = (layerId: string, event: React.MouseEvent) => {
     event.preventDefault();
@@ -483,8 +598,16 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
     const selectedIds = selectedLayerIds.size > 0 ? Array.from(selectedLayerIds) : [layerId];
 
     switch (action) {
+      case 'add-layer':
+        console.log('➕ Adding new layer via context menu');
+        setIsAddingLayer(true);
+        break;
+      case 'select-all-primitives':
+        handleSelectAllPrimitives(layerId);
+        break;
       case 'create-group':
-        const groupId = layerService.createGroupFromLayers(selectedIds);
+        const commonParentId = findCommonParent(selectedIds);
+        const groupId = layerService.createGroupFromLayers(selectedIds, undefined, commonParentId);
         setAutoEditLayerId(groupId);
         break;
       case 'create-block':
@@ -492,10 +615,16 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
         setAutoEditLayerId(blockId);
         break;
       case 'ungroup':
-        layerService.ungroupLayers(selectedIds.filter(id => {
-          const layer = layerService.getLayer(id);
-          return layer?.type === 'group';
-        }));
+        const groupsToUngroup = selectedIds.filter(id => {
+            const layer = layerService.getLayer(id);
+            return layer?.type === 'group';
+        });
+        
+        if (groupsToUngroup.length > 0) {
+            layerService.ungroupLayers(groupsToUngroup);
+        } else {
+            console.log('ℹ️ No groups selected to ungroup');
+        }
         break;
       case 'duplicate':
         console.log('Duplicate layers:', selectedIds);
@@ -523,6 +652,26 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
     }
 
     setContextMenu(null);
+  };
+
+  // Find common parent for multiple layers
+  const findCommonParent = (layerIds: string[]): string | null => {
+      if (layerIds.length === 0) return null;
+      
+      const layers = layerIds.map(id => layerService.getLayer(id)).filter(Boolean) as Layer[];
+      if (layers.length === 0) return null;
+      
+      // For single layer, return its parent
+      if (layers.length === 1) {
+          return layers[0].parentId;
+      }
+      
+      // For multiple layers, check if they share the same parent
+      const parents = layers.map(layer => layer.parentId);
+      const firstParent = parents[0];
+      const allSameParent = parents.every(parent => parent === firstParent);
+      
+      return allSameParent ? firstParent : null;
   };
 
   // Open color palette for a specific layer
@@ -616,7 +765,10 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
 
   // Recursive layer renderer
   const renderLayerTree = (layerList: Layer[], depth: number = 0): JSX.Element[] => {
-    return layerList.map(layer => (
+    return layerList.map(layer => {
+      const isExpanded = expandedState.get(layer.id) ?? true;
+
+      return (
       <React.Fragment key={layer.id}>
         <LayerItem
           layer={layer}
@@ -625,50 +777,391 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
           isSelected={selectedLayerIds.has(layer.id)}
           isHovered={hoveredLayerId === layer.id}
           autoEditLayerId={autoEditLayerId}
+          isExpanded={isExpanded}
+          isDragging={dragState.isDragging}
+          isDragged={dragState.draggedIds.includes(layer.id)}
+          dropPosition={dropPosition?.targetId === layer.id ? dropPosition : null}
+          dragCounter={dragState.draggedIds.includes(layer.id) ? dragState.draggedIds.length : undefined}
           onSelect={handleLayerSelect}
           onActivate={handleLayerActivate}
           onHover={setHoveredLayerId}
           onToggleExpand={(id) => {
-            const layer = layerService.getLayer(id);
-            if (layer) {
-              layerService.updateLayerProperties(id, { 
-                expanded: !layer.properties.expanded 
-              });
-            }
+            // 🎯 INSTANT: Toggle local UI state only
+            setExpandedState(prev => {
+              const newState = new Map(prev);
+              const current = newState.get(id) ?? true;
+              newState.set(id, !current);
+              console.log('⚡ Toggle expand:', { id, from: current, to: !current });
+              return newState;
+            });
           }}
           onContextMenu={handleContextMenu}
           onEditComplete={() => setAutoEditLayerId(null)}
           onColorSwatchClick={handleColorSwatchClick}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onDragEnd={handleDragEnd}
         />
-        {layer.properties.expanded && layer.children.length > 0 && (
+        {isExpanded && layer.children.length > 0 && (
           <div className="layer-children">
             {renderLayerTree(layer.children, depth + 1)}
           </div>
         )}
       </React.Fragment>
-    ));
+      )
+    });
+  };
+
+  // Layer drag & drop handlers (above, below, inside)
+  const handleDragStart = (layerId: string, event: React.DragEvent) => {
+    event.stopPropagation();
+    
+    // Determine which layers to drag (selected or single)
+    const idsToDrag = selectedLayerIds.has(layerId) 
+      ? Array.from(selectedLayerIds) 
+      : [layerId];
+    
+    // Can't drag the default layer nor place any layers above it
+    if (idsToDrag.includes('Default')) {
+      event.preventDefault();
+      return;
+    }
+    const hasDefaultInSelection = idsToDrag.some(id => {
+      const layer = layerService.getLayer(id);
+      return layer?.id === 'Default';
+    });
+    if (hasDefaultInSelection) {
+      event.preventDefault();
+      console.log('🚫 Cannot drag selection containing Default layer');
+      return;
+    }
+
+    setDragState({
+      isDragging: true,
+      draggedIds: idsToDrag,
+      startY: event.clientY,
+      currentY: event.clientY
+    });
+
+    // Set drag image and data
+    const dragImage = document.createElement('div');
+    dragImage.className = 'drag-image-pill';
+    
+    if (idsToDrag.length === 1) {
+      // Single layer: Show layer name
+      const layer = layerService.getLayer(idsToDrag[0]);
+      dragImage.textContent = layer?.properties.name || 'Layer';
+    } else {
+      // Multiple layers: Show count
+      dragImage.textContent = `${idsToDrag.length} layers`;
+    }
+    
+    document.body.appendChild(dragImage);
+    event.dataTransfer.setDragImage(dragImage, dragImage.offsetWidth / 2, dragImage.offsetHeight / 2);
+    
+    // Clean up
+    setTimeout(() => document.body.removeChild(dragImage), 0);
+
+    event.dataTransfer.effectAllowed = 'move';
+    console.log('🧩 Drag started:', idsToDrag);
+  };
+  const handleDragOver = (layerId: string, event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!dragState.isDragging) return;
+
+    setDragState(prev => ({ ...prev, currentY: event.clientY }));
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    const relativeY = event.clientY - rect.top;
+    const height = rect.height;
+    
+    const isTopHalf = relativeY < height / 2;
+    let position: 'above' | 'below' | 'inside' = isTopHalf ? 'above' : 'below';
+
+    const targetLayer = layerService.getLayer(layerId);
+    if (targetLayer && targetLayer.type !== 'layer') {
+      // For groups/blocks, allow inside drops in the middle third
+      const middleThirdStart = height / 3;
+      const middleThirdEnd = (height * 2) / 3;
+      
+      if (relativeY > middleThirdStart && relativeY < middleThirdEnd) {
+        position = 'inside';
+      }
+    }
+
+    // Can't drop inside itself or its children
+    if (targetLayer && dragState.draggedIds.includes(layerId)) {
+      setDropPosition(null);
+      return;
+    }
+
+    // Can't drop inside a layer (only groups/blocks can contain children)
+    if (position === 'inside' && targetLayer?.type === 'layer') {
+      setDropPosition(null);
+      return;
+    }
+
+    console.log('🎯 Detected position:', position);
+    setDropPosition({ targetId: layerId, position });
+    event.dataTransfer.dropEffect = 'move';
+  };
+  const handleDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDropPosition(null);
+  };
+  const handleDrop = (layerId: string, event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!dragState.isDragging || !dropPosition) return;
+
+    console.log('🎯 Drop:', {
+      dragged: dragState.draggedIds,
+      target: layerId,
+      position: dropPosition.position
+    });
+
+    // Perform the reparenting
+    performReparenting(dragState.draggedIds, layerId, dropPosition.position);
+
+    // Reset drag state
+    setDragState({
+      isDragging: false,
+      draggedIds: [],
+      startY: 0,
+      currentY: 0
+    });
+    setDropPosition(null);
+    setIsDragOverPanel(false);
+  };
+  const handleDragEnd = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    setDragState({
+      isDragging: false,
+      draggedIds: [],
+      startY: 0,
+      currentY: 0
+    });
+    setDropPosition(null);
+    setIsDragOverPanel(false);
+    console.log('🧩 Drag ended');
+  };
+
+  const debugRootReordering = () => {
+      console.log('🧪 Testing root reordering...');
+      const rootLayers = layerService.getLayerHierarchy();
+      console.log('Current root order:', rootLayers.map(l => ({ id: l.id, name: l.name })));
+      
+      if (rootLayers.length > 2) {
+          const firstLayer = rootLayers[1]; // Skip Default (Test 1)
+          const lastLayer = rootLayers[rootLayers.length - 1]; // Test 2
+          
+          console.log(`Attempting to move ${firstLayer.name} to position AFTER ${lastLayer.name}`);
+          
+          // 🎯 FIX: To move Test 1 after Test 2, we need insertBeforeId = undefined
+          // This will put it at the end
+          layerService.reparentLayer(firstLayer.id, null, undefined);
+          
+          // Alternative: Move Test 2 before Test 1
+          // layerService.reparentLayer(lastLayer.id, null, firstLayer.id);
+      }
+  };
+  useEffect(() => {
+    (window as any).debugRootReorder = debugRootReordering;
+  }, []);
+
+  // Smart reparenting: Auto-detect pure reordering vs full reparenting
+  const performReparenting = (draggedIds: string[], targetId: string, position: 'above' | 'below' | 'inside') => {
+    const targetLayer = layerService.getLayer(targetId);
+    if (!targetLayer) return;
+
+    let newParentId: string | null = null;
+    let insertBeforeId: string | undefined;
+    
+    if (position === 'inside') {
+      // Drop inside - parent to target
+      newParentId = targetId;
+    } else {
+      // Drop above/below - parent to target's parent
+      newParentId = targetLayer.parentId;
+      
+      // Calculate insertion position
+      const parent = newParentId ? layerService.getLayer(newParentId) : null;
+      const siblings = parent ? parent.children : layerService.getLayerHierarchy();
+
+      if (siblings && siblings.length > 0) {
+        const targetIndex = siblings.findIndex(layer => layer.id === targetId);
+        if (targetIndex !== -1) {
+          if (position === 'above') {
+            // 🎯 FIX: Insert before the target
+            insertBeforeId = targetId;
+            console.log('🔍 Inserting BEFORE target:', targetId);
+          } else if (position === 'below') {
+            // 🎯 FIX: Insert after the target - find next sibling
+            const nextSibling = siblings[targetIndex + 1];
+            insertBeforeId = nextSibling ? nextSibling.id : undefined;
+            console.log('🔍 Inserting AFTER target. Next sibling:', nextSibling?.id);
+          }
+        }
+      }
+    }
+
+    // 🎯 IMPROVED: Smart detection that handles root level
+    const isPureReorder = draggedIds.every(layerId => {
+      const layer = layerService.getLayer(layerId);
+      
+      // Both current and new parent are the same
+      const currentParentId = layer?.parentId || null;
+      return currentParentId === newParentId;
+    });
+
+    console.log('🔍 Smart detection:', {
+      dragged: draggedIds,
+      currentParents: draggedIds.map(id => layerService.getLayer(id)?.parentId),
+      newParentId,
+      isPureReorder
+    });
+
+    if (isPureReorder) {
+      console.log('🔄 Pure reordering detected');
+      performPureReordering(draggedIds, newParentId, insertBeforeId);
+    } else {
+      console.log('🔄 Full reparenting detected');
+      performFullReparenting(draggedIds, newParentId, insertBeforeId);
+    }
+
+    setTimeout(() => {
+      draggedIds.forEach(layerId => {
+        const layer = layerService.getLayer(layerId);
+        if (!layer) {
+          console.error('🚫 CRITICAL: Layer disappeared after reordering!', layerId);
+        } else {
+          const inRoot = layerService.getLayerHierarchy().some(l => l.id === layerId);
+          const inParent = layer.parentId ? layerService.getLayer(layer.parentId)?.children.some(l => l.id === layerId) : false;
+          
+          if (!inRoot && !inParent) {
+            console.error('🚫 Layer not found in any hierarchy after reordering!', layerId);
+            // Emergency recovery - add back to root
+            if (!layer.parentId) {
+              const rootLayers = layerService.getLayerHierarchy();
+              if (!rootLayers.some(l => l.id === layerId)) {
+                console.log('🔄 Emergency recovery: Adding layer back to root');
+                rootLayers.push(layer);
+                layerService.notifyListeners('layersChanged');
+              }
+            }
+          }
+        }
+      });
+    }, 100);
+  };
+  const performPureReordering = (draggedIds: string[], parentId: string | null, insertBeforeId?: string) => {
+    draggedIds.forEach((layerId, index) => {
+      const actualInsertBeforeId = index === 0 ? insertBeforeId : undefined;
+      layerService.reparentLayer(layerId, parentId, actualInsertBeforeId);
+    });
+
+    // Force update the layers state
+    setLayers(layerService.getLayerHierarchy());
+  };
+  const performFullReparenting = (draggedIds: string[], newParentId: string | null, insertBeforeId?: string) => {
+    // Use the existing reparentLayer for each dragged layer
+    draggedIds.forEach(layerId => {
+      layerService.reparentLayer(layerId, newParentId, insertBeforeId);
+    });
+
+    // Force update the layers state
+    setLayers(layerService.getLayerHierarchy());
+  };
+
+  // Panel-level drag handlers
+  const handlePanelDragOver = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setIsDragOverPanel(true);
+    event.dataTransfer.dropEffect = 'move';
+  };
+  const handlePanelDragLeave = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+      setIsDragOverPanel(false);
+      setDropPosition(null);
+    }
+  };
+  const handlePanelDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    
+    if (!dragState.isDragging) return;
+
+    // 🎯 IMPROVED: Drop on empty panel = move to root level at top
+    const rootLayers = layerService.getLayerHierarchy();
+    let insertBeforeId: string | undefined;
+    
+    // Find the top-most non-Default layer to insert above it
+    if (rootLayers.length > 0) {
+      const topLayer = rootLayers[0];
+      if (topLayer.id !== 'Default') {
+        insertBeforeId = topLayer.id; // Insert above the current top layer
+      } else if (rootLayers.length > 1) {
+        insertBeforeId = rootLayers[1].id; // Insert above the second layer (below Default)
+      }
+    }
+
+    console.log('📦 Panel drop - inserting at root level before:', insertBeforeId);
+
+    // Use smart reparenting to move to root level
+    performReparenting(dragState.draggedIds, 'root', 'below');
+    
+    setDragState({
+      isDragging: false,
+      draggedIds: [],
+      startY: 0,
+      currentY: 0
+    });
+    setDropPosition(null);
+    setIsDragOverPanel(false);
   };
 
   return (
     <div className="layers-panel" ref={panelRef}>
-      {/* Search Bar and Add New Layer */}
-      <div className="layer-search">
-        <input
-          type="text"
-          placeholder="Search layers..."
-          className="search-input"
-        />
-        <button 
-          className="add-layer-button"
-          onClick={() => setIsAddingLayer(true)}
-          title="Add New Layer"
-        >
-          <NewLayerIcon />
-        </button>
+
+      {/* Panel Header */}
+      <div className="panel-header">
+        Layers
       </div>
       
       {/* Panel Body */}
-      <div className="panel-body">
+      <div className="panel-body"
+        onDragOver={handlePanelDragOver}
+        onDragLeave={handlePanelDragLeave}
+        onDrop={handlePanelDrop}
+      >
+
+        {/* Search Bar and Add New Layer */}
+        {/* <div className="layer-search">
+          <input
+            type="text"
+            placeholder="Search layers..."
+            className="search-input"
+          />
+          <button 
+            className="add-layer-button"
+            onClick={() => setIsAddingLayer(true)}
+            title="Add New Layer"
+          >
+            <NewLayerIcon />
+          </button>
+        </div> */}
+
         {/* Layers List */}
         <div className="layers-list">
           {/* Add New Layer Input */}
@@ -693,6 +1186,7 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
           {/* Layer Tree */}
           {renderLayerTree(layers)}
         </div>
+
       </div>
 
       {/* Context Menu */}
@@ -702,6 +1196,13 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onMouseDown={(e) => e.stopPropagation()}
         >
+          <div className="context-menu-item" onClick={() => handleContextMenuAction('add-layer')}>
+            Add New Layer
+          </div>
+          <div className="context-menu-item" onClick={() => handleContextMenuAction('select-all-primitives')}>
+            Select All Primitives
+          </div>
+          <div className="context-menu-divider" />
           <div className="context-menu-item" onClick={() => handleContextMenuAction('create-group')}>
             Create Group
           </div>

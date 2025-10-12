@@ -73,7 +73,7 @@ export const ExpandIcon: React.FC<IconProps> = ({ className = "", size = 16 }) =
     className={className} 
     width={size} 
     height={size} 
-    viewBox="0 0 17 17" 
+    viewBox="0 0 16 16" 
     fill="currentColor"
   >
     <path stroke="none" strokeWidth="1" fill="#ffffff" fillRule="evenodd" d="M6.077,1.162 C6.077,1.387 6.139,1.612 6.273,1.812 L10.429,8.041 L6.232,14.078 C5.873,14.619 6.019,15.348 6.56,15.707 C7.099,16.068 7.831,15.922 8.19,15.382 L12.82,8.694 C13.084,8.3 13.086,7.786 12.822,7.39 L8.233,0.51 C7.873,-0.032 7.141,-0.178 6.601,0.181 C6.26,0.409 6.077,0.782 6.077,1.162 L6.077,1.162 Z"></path>
@@ -85,7 +85,7 @@ export const CollapseIcon: React.FC<IconProps> = ({ className = "", size = 16 })
     className={className} 
     width={size} 
     height={size} 
-    viewBox="0 0 17 17" 
+    viewBox="0 0 16 16" 
     fill="currentColor"
   >
     <path stroke="none" strokeWidth="1" fill="#ffffff" fillRule="evenodd" d="M2.16,6.246 C2.385,6.246 2.61,6.308 2.81,6.442 L9.039,10.598 L15.076,6.401 C15.617,6.042 16.346,6.188 16.705,6.729 C17.065,7.268 16.92,8 16.38,8.359 L9.692,12.989 C9.298,13.253 8.784,13.254 8.388,12.991 L1.508,8.402 C0.966,8.042 0.82,7.31 1.179,6.77 C1.407,6.429 1.78,6.246 2.16,6.246 L2.16,6.246 Z"></path>

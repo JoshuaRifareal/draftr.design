@@ -4,9 +4,11 @@
   top: 60px;
   left: 20px;
   width: 250px;
-  padding: 16px;
+  /* padding: 16px; */
   background: var(--panelBody-bg);
-  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  overflow: hidden;
   box-shadow: 0 4px 12px var(--shadow-color);
   z-index: 1000;
   font-size: 12px;
@@ -18,6 +20,16 @@
   -ms-user-select: none;
 }
 
+.panel-header {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: left;
+  padding: 0 12px;
+  background-color: #23232b;
+}
+
+
 .layer-search {
   display: flex;
   gap: 8px;
@@ -26,16 +38,17 @@
 
 .search-input {
   flex: 1;
-  padding: 6px 8px;
-  border: 1px solid var(--border-color);
+  padding: 4px 8px;
+  /* border: 1px solid var(--border-color); */
+  border: none;
   border-radius: 12px;
   background: var(--inputArea-bg);
   color: var(--text-primary);
-}
 
-.search-input:focus {
-  outline: none;
-  border-color: #5f51ff;
+  &:focus {
+    outline: none;
+    border-color: #5f51ff;
+  }
 }
 
 .add-layer-button {
@@ -57,16 +70,15 @@
 
 .add-layer-button:hover {
   opacity: 1.0;
-  transform: scale(1.025);}
+  transform: scale(1.025);
+}
 
 .panel-body {
+  padding: 12px;
   max-height: 400px;
   overflow-y: auto;
 }
 
-.layers-list {
-  /* padding: 12px; */
-}
 
 /* Layer Item Styles */
 .layer-item {
@@ -102,13 +114,18 @@
   border-left: 3px solid #ff4444;
 }
 
-.layer-item.type-group {
-  /* font-weight: 600; */
+/* Children Indentation */
+.layer-children {
+  border-left: 1px solid var(--border-color);
+  margin-left: 14px;
 }
+
 
 /* Expand Toggle */
 .expand-toggle {
-  width: 24px;
+  width: 8px;
+  padding: 0;
+  margin-right: 4px;
   border: none;
   background: none;
   cursor: pointer;
@@ -118,7 +135,7 @@
   justify-content: center;
 
   svg {
-    width: 80%;
+    width: 100%;
     aspect-ratio: 1/1;
   }
 }
@@ -179,7 +196,6 @@
 .control-button.lock[title*="Lock"] {
   color: #ffc107;
 }
-
 
 
 /* Layer Info */
@@ -273,11 +289,7 @@
   50% { opacity: 0.5; }
 }
 
-/* Children Indentation */
-.layer-children {
-  border-left: 1px solid var(--border-color);
-  margin-left: 16px;
-}
+
 
 /* Orphaned Section */
 .orphaned-section {
@@ -362,4 +374,107 @@
 
 .panel-body::-webkit-scrollbar-thumb:hover {
   background: var(--text-secondary);
+}
+
+
+
+
+/* ==================== DRAG & DROP STYLES ==================== */
+
+/* Drag cursor */
+.dragging * {
+  cursor: grabbing !important;
+}
+
+/* Dragged item styling */
+.layer-item.dragging {
+  opacity: 0.6;
+  background-color: var(--drag-bg, #e2e8f0) !important;
+  transform: scale(0.98);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+}
+
+/* Drop zone indicators */
+.layer-item.drop-above::before {
+  content: '';
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--accent-color, #4299e1);
+  z-index: 100;
+}
+
+.layer-item.drop-below::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--accent-color, #4299e1);
+  z-index: 100;
+}
+
+.layer-item.drop-inside {
+  background-color: var(--drop-inside-bg, #ebf8ff) !important;
+  border: 1px dashed var(--accent-color, #4299e1);
+}
+
+/* Drag handle */
+.drag-handle {
+  cursor: grab;
+  display: none;
+  margin-right: 4px;
+}
+
+.layer-item:hover .drag-handle {
+  /* display: block; */
+  opacity: 0.8;
+}
+
+.layer-item.dragging .drag-handle {
+  opacity: 1;
+}
+
+.drag-handle:hover {
+  opacity: 1 !important;
+  background-color: var(--toolButton-hover-bg);
+}
+
+.drag-image-pill {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--toolButton-bg);
+  color: var(--toolButton-color);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  white-space: nowrap;
+  position: absolute;
+  top: -1000px;
+  left: -1000px;
+}
+
+/* Drop preview */
+.drop-preview {
+  background-color: var(--drop-preview-bg, #e6fffa);
+  border: 1px dashed var(--success-color, #38a169);
+  opacity: 0.8;
+}
+
+/* Theme-aware variables */
+.theme-dark .layer-item.dragging {
+  background-color: var(--drag-bg, #2d3748) !important;
+}
+
+.theme-dark .layer-item.drop-inside {
+  background-color: var(--drop-inside-bg, #1a365d) !important;
+}
+
+.theme-dark .drop-preview {
+  background-color: var(--drop-preview-bg, #1a3a34);
 }

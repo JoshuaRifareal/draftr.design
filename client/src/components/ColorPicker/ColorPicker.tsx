@@ -125,7 +125,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
         />
         
         <div className="hex-input-container">
-          <label>Hex Color:</label>
+          {/* <label>Hex Color:</label> */}
           <div className="hex-input-wrapper">
             <input
               type="text"

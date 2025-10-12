@@ -694,6 +694,9 @@ const App: React.FC = () => {
           activeLayer: layerService.getActiveLayer()
         };
       };
+      (window as any).debugLayerHierarchy = () => {
+        layerService['debugLayerHierarchy']();
+      };
 
       //  Block deletion test
       (window as any).testBlockDeletion = () => {
@@ -987,47 +990,253 @@ const App: React.FC = () => {
     throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = getMousePos(evt);
       const cursorWorld = screenToWorld(pos.x, pos.y);
+      let snapResult: SnapResult;
       
-      // Handle special modes first
+      // Only calculate snap for drawing tools
+      if (activeTool === 'SELECTION') {
+        // 🚫 SELECTION MODE: No snapping needed
+        snapResult = {
+          position: cursorWorld,
+          type: 'none',
+          strength: 0
+        };
+        snapResultRef.current = snapResult;
+      } else {
+        // ✅ DRAWING MODE: Calculate snapping
+        snapResult = snappingService.findSnap(pos, contextManager.getContext());
+        let finalSnapResult = snapResult;
+
+        // Constraint state management to prevent premature clearing
+        // Keep constraint guides visible during intersection snapping
+        const currentSnapResult = snapResultRef.current;  
+        if (currentSnapResult.type === 'constraint' && currentSnapResult.metadata?.constraint) {
+          CommandAdapters.setActiveConstraint(currentSnapResult.metadata.constraint);
+        } else if (currentSnapResult.type === 'intersection') {
+          // CAN WE ADD HERE TO FORCE SHOW PREVIOUS DETECTED CONSTRAINT?
+        } else if (currentSnapResult.type === 'vertex') {
+          // Only clear constraint if we're strongly snapped to vertex
+          if (currentSnapResult.strength > 0.8) {
+            CommandAdapters.setActiveConstraint(null);
+          }
+        } else {
+          // Clear constraint only when we're definitely not in any constraint scenario
+          CommandAdapters.setActiveConstraint(null);
+        }
+
+        // Hysteresis Logic
+        if (hysteresisActive && currentSnap?.type === 'vertex') {
+          const currentVertex = currentSnap.position;
+          
+          // Calculate distance in WORLD coordinates (not screen)
+          const worldDistance = Math.sqrt(
+            Math.pow(cursorWorld.x - currentVertex.x, 2) + 
+            Math.pow(cursorWorld.y - currentVertex.y, 2)
+          );
+          const UNSNAP_THRESHOLD = (SNAP_THRESHOLD / scale); // Scale-aware threshold
+          
+          console.log('🎯 Hysteresis active - distance:', worldDistance.toFixed(2), 'threshold:', UNSNAP_THRESHOLD.toFixed(2));
+          
+          if (worldDistance <= UNSNAP_THRESHOLD) {
+            // Stay locked, but check if we found a better vertex
+            if (snapResult.type === 'vertex' && snapResult.strength > currentSnap.strength) {
+              console.log('🔄 Switching to better vertex:', snapResult.position);
+              // Switch to better vertex
+              finalSnapResult = snapResult;
+              setCurrentSnap({
+                type: 'vertex',
+                position: snapResult.position,
+                strength: snapResult.strength
+              });
+            } else {
+              // Keep current vertex with updated strength
+              finalSnapResult = {
+                position: currentVertex,
+                type: 'vertex',
+                metadata: { vertex: currentVertex },
+                strength: Math.max(0.7, 1 - (worldDistance / UNSNAP_THRESHOLD))
+              };
+              console.log('🔒 Staying locked to vertex:', currentVertex);
+            }
+          } else {
+            // Outside threshold - release hysteresis
+            console.log('🔓 Releasing hysteresis - too far from vertex');
+            setHysteresisActive(false);
+            setCurrentSnap(null);
+            orthoTempDisabledRef.current = false;
+            constraintTempDisabledRef.current = false;
+            setOrthoTempDisabled(false);
+            setConstraintTempDisabled(false);
+          }
+        }
+
+        // 🎯 VERTEX PRIORITY: If we found a new vertex and not in hysteresis
+        if (!hysteresisActive && finalSnapResult.type === 'vertex') {
+          console.log('🔐 Locking to new vertex:', finalSnapResult.position);
+          setHysteresisActive(true);
+          setCurrentSnap({
+            type: 'vertex', 
+            position: finalSnapResult.position,
+            strength: finalSnapResult.strength
+          });
+          // 🎯 IMMEDIATE disabling using refs
+          orthoTempDisabledRef.current = true;
+          constraintTempDisabledRef.current = true;
+          setOrthoTempDisabled(true);
+          setConstraintTempDisabled(true);
+        }
+
+        // Extend visual indicator during hysteresis when snap service returns 'none'
+        if (hysteresisActive && currentSnap?.type === 'vertex' && finalSnapResult.type === 'none') {
+          const currentVertex = currentSnap.position;
+          const worldDistance = Math.sqrt(
+            Math.pow(cursorWorld.x - currentVertex.x, 2) + 
+            Math.pow(cursorWorld.y - currentVertex.y, 2)
+          );
+          const VISUAL_THRESHOLD = (SNAP_THRESHOLD / scale); // Use same threshold now
+          
+          if (worldDistance <= VISUAL_THRESHOLD) {
+            console.log('🔵 Extending snap indicator during hysteresis');
+            finalSnapResult = {
+              position: currentVertex,
+              type: 'vertex',
+              metadata: { vertex: currentVertex },
+              strength: Math.max(0.3, 1 - (worldDistance / VISUAL_THRESHOLD)) // Fade out near edge
+            };
+          }
+        }
+
+        // Update snapResultRef with the final result (including hysteresis)
+        const shouldUpdateSnapRef = 
+          finalSnapResult.type !== snapResultRef.current.type ||
+          finalSnapResult.position.x !== snapResultRef.current.position.x ||
+          finalSnapResult.position.y !== snapResultRef.current.position.y;
+
+        if (shouldUpdateSnapRef) {
+          snapResultRef.current = finalSnapResult;
+        }
+
+        // Temporary disabling now handled by hysteresis logic above
+        // Only reset if we're completely out of hysteresis
+        if (!hysteresisActive && (orthoTempDisabledRef.current || constraintTempDisabledRef.current)) {
+          orthoTempDisabledRef.current = false;
+          constraintTempDisabledRef.current = false;
+          setOrthoTempDisabled(false);
+          setConstraintTempDisabled(false);
+        }
+
+      }
+
+      const constraintSnap = snapResultRef.current.type === 'constraint' ? snapResultRef.current.position : null;
+      let intersectionSnap = null;
+      let finalPos = snapResultRef.current.type === 'vertex' ? snapResultRef.current.position : 
+                    intersectionSnap ?? constraintSnap ?? cursorWorld;
+      let preview = finalPos;
+
+      // Panning functionality
       if (panStart) {
         const dx = (pos.x - panStart.x) / scale;
         const dy = (pos.y - panStart.y) / scale;
+        
         CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
+        
         setIsDrawing(false);
         setPanStart({ x: pos.x, y: pos.y });
         debouncedRedraw(previewEnd, snapResultRef.current);
         return;
       }
 
+      // Selection rectangle - IMMEDIATE updates
       if (activeTool === 'SELECTION' && selectionStart) {
         CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
-        redrawAll(previewEnd, snapResultRef.current);
+        redrawAll(previewEnd, snapResultRef.current); // Immediate redraw for selection
         return;
       }
 
-      // Process snapping based on tool mode
-      if (activeTool === 'SELECTION') {
-        snapResultRef.current = { position: cursorWorld, type: 'none', strength: 0 };
+      // Check for vertex hover to toggle constraints (drawing tools only)
+      if (activeTool !== 'SELECTION' && snapResultRef.current.type === 'vertex' && snapResultRef.current.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
+        const vertex = snapResultRef.current.metadata.vertex;
+        const key = getVertexKey(vertex);
+        
+        if (!hoveredVerticesRef.current.has(key)) {
+          hoveredVerticesRef.current.add(key);
+          toggleVertexConstraint(vertex);
+          console.log(`🎯 Added constraint for vertex: ${key}`);
+        }
       } else {
-        processDrawingSnapping(pos, cursorWorld);
+        hoveredVerticesRef.current.clear();
       }
 
-      // Handle constraint detection for drawing tools
-      if (activeTool !== 'SELECTION') {
-        handleConstraintDetection(pos, cursorWorld);
+      // Detect currentStart point for constraints when not snapping to it
+      if (activeTool !== 'SELECTION' && currentStart && snappingService.getConfig().constraintEnabled) {
+        const currentStartScreen = worldToScreen(currentStart.x, currentStart.y);
+        const cursorScreen = pos;
+        
+        // Check if cursor is hovering near currentStart point (for constraint detection only)
+        const dx = currentStartScreen.x - cursorScreen.x;
+        const dy = currentStartScreen.y - cursorScreen.y;
+        const screenDistance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (screenDistance < SNAP_THRESHOLD) {
+          const key = getVertexKey(currentStart);
+          if (!hoveredVerticesRef.current.has(key)) {
+            hoveredVerticesRef.current.add(key);
+            toggleVertexConstraint(currentStart);
+            console.log(`🎯 Added constraint for currentStart: ${key}`);
+          }
+        }
       }
 
-      // Update preview if we have a starting point
-      if (currentStart) {
-        updateToolPreview(cursorWorld);
+      if (!currentStart) return;
+
+      if (activeTool === 'LINE') {
+        const currentSnapResult = snapResultRef.current;
+
+        if (currentSnapResult.type === 'intersection') {
+          preview = currentSnapResult.position;
+        } else if (hysteresisActive && currentSnap?.type === 'vertex') {
+          console.log('🔒 Hysteresis active - locking to vertex at:', currentSnap.position);
+          preview = currentSnap.position;
+        } else if (currentSnapResult.type === 'vertex') {
+          preview = currentSnapResult.position;
+        } else if (shiftHeld) {
+          const dx = finalPos.x - currentStart.x;
+          const dy = finalPos.y - currentStart.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const nearest = nearestOrthoAngleDeg(currentStart, finalPos);
+          const rad = (nearest.angle * Math.PI) / 180;
+          preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
+        } else if (shouldUseOrthoSnapping() && !orthoTempDisabledRef.current) {
+          const constrained = applyOrthoConstraint(currentStart, finalPos);
+          if (constrained) {
+            preview = { x: constrained.x, y: constrained.y };
+          } else {
+            preview = finalPos;
+          }
+        } else {
+          preview = finalPos;
+        }
+
+        CommandAdapters.updatePreview(preview);
+        debouncedRedraw(preview, snapResultRef.current);
+        return;
       }
+
+      // Rectangle preview (drawing tools only)
+      if (activeTool === 'RECTANGLE' && currentStart) {
+        CommandAdapters.updatePreview(finalPos);
+        debouncedRedraw(finalPos, snapResultRef.current);
+        return;
+      }
+
+      CommandAdapters.updatePreview(preview);
+      debouncedRedraw(preview, snapResultRef.current);
     }, 8),
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
       screenToWorld, snappingService, debouncedRedraw, previewEnd,
       hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled,
-      SNAP_THRESHOLD, nearestOrthoAngleDeg, applyOrthoConstraint,
-      shouldUseOrthoSnapping, getVertexKey, toggleVertexConstraint,
+      worldToScreen, SNAP_THRESHOLD, nearestOrthoAngleDeg, applyOrthoConstraint,
+      shouldUseOrthoSnapping, getVertexKey, toggleVertexConstraint, vertexConstraints,
       contextManager, redrawAll
     ]
   );
