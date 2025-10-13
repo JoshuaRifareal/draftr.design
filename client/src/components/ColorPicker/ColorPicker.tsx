@@ -140,16 +140,16 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
 
         <div className="color-picker-actions">
           <button 
-            className="color-picker-cancel"
-            onClick={onCancel}
-          >
-            Cancel
-          </button>
-          <button 
             className="color-picker-apply"
             onClick={handleApply}
           >
             Apply
+          </button>
+          <button 
+            className="color-picker-cancel"
+            onClick={onCancel}
+          >
+            Cancel
           </button>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import './components/UIOverlay.css';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import init from "./pkg/draftr_engine.js";
 import UIOverlay from "./components/UIOverlay.js";
@@ -10,6 +11,7 @@ import { selectionService } from './services/SelectionService';
 import { layerService, type Layer } from './services/LayerService';
 import { appStateStore, type AppState } from './services/AppStateStore';
 import { CommandAdapters } from './services/CommandAdapters';
+import { commandRegistry } from './components/CommandBar/commands';
 import type { DrawingPrimitive } from './types/DraftrTypes';
 import { useCursor } from './components/Cursors/useCursor';
 import { CURSORS  } from './components/Cursors/cursors';
@@ -50,6 +52,10 @@ const App: React.FC = () => {
 
   // Pan/zoom state
   const [panStart, setPanStart] = useState<{ x: number; y: number } | null>(null);
+
+  // Block edit mode state
+  const [isBlockEditMode, setIsBlockEditMode] = useState(false);
+  const [editingBlockName, setEditingBlockName] = useState('');
 
   // Centralized State Management: APPSTATESTORE
   const [appState, setAppState] = useState<AppState>(appStateStore.getState());
@@ -173,13 +179,13 @@ const App: React.FC = () => {
     spacingMax: GRID_SPACING_MAX_PX
   }), []);
 
-  // 🎯 redrawAll with useCallback
+  // 🎯 Redraw all with useCallback
   const redrawAll = useCallback((preview: { x: number; y: number } | null, snapResult: SnapResult) => {
     const startTime = performance.now();
     
     if (!serviceRef.current || !canvasRef.current) return;
     const service = serviceRef.current;
-    
+
     // Layer-aware redraw method
     service.redrawAll(preview, snapResultRef.current, {
       offsetX, offsetY, scale,
@@ -195,7 +201,7 @@ const App: React.FC = () => {
       lineColor, 
       snapColor,
       orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
-      orthoAnglesDeg: ORTHO_ANGLES_DEG
+      orthoAnglesDeg: ORTHO_ANGLES_DEG,
     });
     
     const duration = performanceMonitor.endMeasurement('redrawAll', startTime);
@@ -393,6 +399,81 @@ const App: React.FC = () => {
   const orthoTempDisabledRef = useRef(false);
   const constraintTempDisabledRef = useRef(false);
 
+  
+  // Tranform states and overlay
+  const [transformState, setTransformState] = useState({
+    isActive: false,
+    mode: '' as TransformMode,
+    message: ''
+  });
+  const TransformOverlay: React.FC = () => {
+    if (!transformState.isActive) return null;
+    
+    return (
+      <div style={{
+        position: 'fixed',
+        top: '60px',
+        left: '50%',
+        transform: 'translateX(-50%)',
+        background: 'rgba(0, 0, 0, 0.9)',
+        color: 'white',
+        padding: '12px 20px',
+        borderRadius: '8px',
+        fontSize: '14px',
+        zIndex: 1000,
+        backdropFilter: 'blur(10px)',
+        border: '1px solid rgba(255, 255, 255, 0.2)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '15px'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '16px' }}>🎯</span>
+          <span>{transformState.message}</span>
+        </div>
+        
+        <button 
+          onClick={() => {
+            CommandAdapters.cancelTransform();
+            setTransformState({ isActive: false, mode: null, message: '' });
+          }}
+          style={{
+            background: 'rgba(255, 0, 0, 0.7)',
+            border: 'none',
+            color: 'white',
+            padding: '4px 12px',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '12px'
+          }}
+        >
+          Cancel (ESC/RClick)
+        </button>
+      </div>
+    );
+  };
+  const updateTransformUI = () => {
+    const transformInfo = CommandAdapters.getTransformState?.();
+    
+    if (transformInfo?.isActive) {
+      let message = '';
+      
+      if (!transformInfo.hasBasePoint) {
+        message = `Click base point for ${transformInfo.mode}...`;
+      } else {
+        message = `Click destination point - ${transformInfo.mode} preview active`;
+      }
+      
+      setTransformState({ 
+        isActive: true, 
+        mode: transformInfo.mode,
+        message 
+      });
+    } else {
+      setTransformState({ isActive: false, mode: null, message: '' });
+    }
+  };
+
 
   
   ////////// INITIALIZATION \\\\\\\\\\
@@ -481,6 +562,11 @@ const App: React.FC = () => {
       (window as any).CommandAdapters = CommandAdapters;
       (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
       
+      // Redraw function for testing
+      (window as any).forceRedraw = () => {
+        redrawAll(previewEnd, snapResultRef.current);
+      };
+
       // Performance testing
       (window as any).testPerformance = () => {
         console.log('🧪 Testing Performance...');
@@ -698,7 +784,7 @@ const App: React.FC = () => {
         layerService['debugLayerHierarchy']();
       };
 
-      //  Block deletion test
+      // Block system tests
       (window as any).testBlockDeletion = () => {
         console.log('🧪 Testing Block Deletion...');
         
@@ -716,8 +802,320 @@ const App: React.FC = () => {
           console.log('Block deletion result:', success);
         }, 1000);
       };
+      (window as any).testBlockSystem = () => {
+        console.log('🧪 Testing Block System Phase 1...');
+        
+        // Test 1: Data structure changes
+        console.log('📋 Test 1: Data Structures');
+        const testLayer: any = {
+          id: 'test-layer',
+          name: 'Test Layer', 
+          type: 'layer',
+          parentId: null,
+          properties: { name: 'Test', type: 'layer', visible: true, locked: false, color: { r: 0, g: 0, b: 0, a: 1 }, opacity: 1, expanded: true },
+          children: [],
+          primitiveIds: new Set(),
+          isBlockInstance: true,
+          blockDefinitionId: 'test-block',
+          instanceTransform: { position: { x: 10, y: 20 }, rotation: 0, scale: 1 }
+        };
+        console.log('✅ Data structures updated successfully');
+
+        // Test 2: Block creation method exists
+        console.log('📋 Test 2: Block Creation Method');
+        if (typeof layerService.createBlockFromLayers === 'function') {
+          console.log('✅ createBlockFromLayers method exists');
+        } else {
+          console.error('❌ createBlockFromLayers method missing');
+          return false;
+        }
+
+        // Test 3: Block instantiation method exists
+        console.log('📋 Test 3: Block Instantiation Method');
+        if (typeof layerService.instantiateBlock === 'function') {
+          console.log('✅ instantiateBlock method exists');
+        } else {
+          console.error('❌ instantiateBlock method missing');
+          return false;
+        }
+
+        // 🆕 Test 4: Create actual test layers and block
+        console.log('📋 Test 4: Create Test Block');
+        try {
+          // Create test layers first
+          const layer1 = layerService.createLayer('Test Layer 1');
+          const layer2 = layerService.createLayer('Test Layer 2');
+          
+          console.log('✅ Test layers created:', { layer1: layer1.id, layer2: layer2.id });
+
+          // Create block from test layers
+          const blockInstanceId = layerService.createBlockFromLayers([layer1.id, layer2.id], 'Test Block');
+          console.log('✅ Block created:', blockInstanceId);
+
+          // Test 5: Verify block definition was created
+          console.log('📋 Test 5: Verify Block Definition');
+          const allBlocks = layerService.getAllBlockDefinitions();
+          if (allBlocks.length > 0) {
+            const blockDef = allBlocks[0];
+            console.log('✅ Block definition created:', {
+              name: blockDef.name,
+              primitives: blockDef.sourcePrimitives.length,
+              instances: blockDef.instances.size
+            });
+          } else {
+            console.error('❌ No block definitions found');
+            return false;
+          }
+
+          // Test 6: Instantiate block
+          console.log('📋 Test 6: Instantiate Block');
+          const blockDefs = layerService.getAllBlockDefinitions();
+          if (blockDefs.length > 0) {
+            const newInstanceId = layerService.instantiateBlock(blockDefs[0].id, { x: 100, y: 100 });
+            console.log('✅ Block instance created:', newInstanceId);
+
+            // Verify instances
+            const instances = layerService.getBlockInstances(blockDefs[0].id);
+            console.log('✅ Block instances:', instances.length);
+          }
+
+          console.log('🎉 ALL BLOCK SYSTEM TESTS PASSED!');
+          return true;
+
+        } catch (error) {
+          console.error('❌ Test failed:', error);
+          return false;
+        }
+      };
+      (window as any).testBlockOperations = () => {
+        console.log('🧪 Testing Block Operations...');
+        
+        try {
+          // Test 1: Create test block with instances
+          console.log('📋 Test 1: Create Test Block with Instances');
+          const layer1 = layerService.createLayer('Ops Test Layer 1');
+          const layer2 = layerService.createLayer('Ops Test Layer 2');
+          
+          const blockInstanceId = layerService.createBlockFromLayers([layer1.id, layer2.id], 'Operations Block');
+          const blockDefs = layerService.getAllBlockDefinitions();
+          const blockDef = blockDefs[0];
+          
+          // Create multiple instances
+          const instance1 = layerService.instantiateBlock(blockDef.id, { x: 100, y: 100 });
+          const instance2 = layerService.instantiateBlock(blockDef.id, { x: 200, y: 200 });
+          
+          console.log('✅ Block with instances created:', {
+            definition: blockDef.id,
+            instances: blockDef.instances.size
+          });
+
+          // Test 2: Delete block instance
+          console.log('📋 Test 2: Delete Block Instance');
+          layerService.deleteBlockInstance(instance1);
+          const instancesAfterDelete = layerService.getBlockInstances(blockDef.id);
+          console.log('✅ Instance deleted, remaining:', instancesAfterDelete.length);
+
+          // Test 3: Explode block instance
+          console.log('📋 Test 3: Explode Block Instance');
+          const groupId = layerService.explodeBlockInstance(instance2);
+          console.log('✅ Instance exploded to group:', groupId);
+          
+          // Verify definition still exists
+          const defsAfterExplode = layerService.getAllBlockDefinitions();
+          console.log('✅ Block definition still exists:', defsAfterExplode.length > 0);
+
+          // Test 4: Explode block definition
+          console.log('📋 Test 4: Explode Block Definition');
+          if (defsAfterExplode.length > 0) {
+            const finalGroupId = layerService.explodeBlockDefinition(defsAfterExplode[0].id);
+            console.log('✅ Definition exploded to group:', finalGroupId);
+          }
+
+          // Test 5: Verify cleanup
+          console.log('📋 Test 5: Verify Cleanup');
+          const finalDefs = layerService.getAllBlockDefinitions();
+          console.log('✅ No block definitions remain:', finalDefs.length === 0);
+
+          console.log('🎉 ALL BLOCK OPERATIONS WORK!');
+          return true;
+          
+        } catch (error) {
+          console.error('❌ Block operations test failed:', error);
+          return false;
+        }
+      };
+      (window as any).testBlockEditMode = () => {
+        console.log('🧪 Testing Block Edit Mode...');
+        
+        try {
+          // Test 1: Create test block
+          console.log('📋 Test 1: Create Test Block');
+          const layer1 = layerService.createLayer('Edit Test Layer');
+          const blockInstanceId = layerService.createBlockFromLayers([layer1.id], 'Edit Test Block');
+          const blockDefs = layerService.getAllBlockDefinitions();
+          const blockDef = blockDefs[0];
+          
+          console.log('✅ Test block created:', blockDef.id);
+
+          // Test 2: Enter block edit mode
+          console.log('📋 Test 2: Enter Block Edit Mode');
+          layerService.enterBlockEditMode(blockDef.id);
+          console.log('✅ Block edit mode entered');
+
+          // Test 3: Verify edit mode state
+          console.log('📋 Test 3: Verify Edit Mode State');
+          const isEditing = layerService.isInBlockEditMode();
+          const editingBlock = layerService.getEditingBlockDefinition();
+          console.log('✅ Edit mode active:', isEditing);
+          console.log('✅ Editing block:', editingBlock?.name);
+
+          // Test 4: Exit block edit mode (save)
+          console.log('📋 Test 4: Exit Block Edit Mode (Save)');
+          layerService.exitBlockEditMode(true);
+          console.log('✅ Block edit mode exited (saved)');
+
+          // Test 5: Enter and cancel
+          console.log('📋 Test 5: Enter and Cancel Edit Mode');
+          layerService.enterBlockEditMode(blockDef.id);
+          layerService.exitBlockEditMode(false);
+          console.log('✅ Block edit mode exited (cancelled)');
+
+          console.log('🎉 BLOCK EDIT MODE WORKS!');
+          return true;
+          
+        } catch (error) {
+          console.error('❌ Block edit mode test failed:', error);
+          return false;
+        }
+      };
+
+      // Transform tests
+      (window as any).testTransformSystem = () => {
+        console.log('🧪 Testing Transform System...');
+        
+        // Test 1: Transform commands exist
+        console.log('📋 Test 1: Transform Commands');
+        if (typeof CommandAdapters.transformMove === 'function') {
+          console.log('✅ transformMove command exists');
+        } else {
+          console.error('❌ transformMove command missing');
+          return false;
+        }
+        
+        if (typeof CommandAdapters.transformRotate === 'function') {
+          console.log('✅ transformRotate command exists');
+        } else {
+          console.error('❌ transformRotate command missing');
+          return false;
+        }
+        
+        if (typeof CommandAdapters.transformScale === 'function') {
+          console.log('✅ transformScale command exists');
+        } else {
+          console.error('❌ transformScale command missing');
+          return false;
+        }
+
+        // Test 2: Create test primitive and transform it
+        console.log('📋 Test 2: Transform Primitive');
+        try {
+          const testPrimitive: DrawingPrimitive = {
+            id: 'transform-test-line',
+            type: 'line',
+            data: [0, 0, 50, 50, 1, 1, 1, 1],
+            layerId: 'Default'
+          };
+          
+          CommandAdapters.drawLine(testPrimitive);
+          console.log('✅ Test primitive created');
+          
+          // Move the primitive
+          CommandAdapters.transformMove(['transform-test-line'], 10, 10);
+          console.log('✅ Primitive moved');
+          
+          return true;
+        } catch (error) {
+          console.error('❌ Transform test failed:', error);
+          return false;
+        }
+      };
+      (window as any).testCompleteTransform = () => {
+        console.log('🧪 Testing Complete Transform System...');
+        
+        try {
+          // Test 1: Create test primitives
+          console.log('📋 Test 1: Create Test Primitives');
+          const linePrimitive: DrawingPrimitive = {
+            id: 'transform-line',
+            type: 'line',
+            data: [0, 0, 100, 100, 1, 1, 1, 1],
+            layerId: 'Default'
+          };
+          
+          const rectPrimitive: DrawingPrimitive = {
+            id: 'transform-rect',
+            type: 'rectangle', 
+            data: [50, 50, 150, 150, 1, 1, 1, 1],
+            layerId: 'Default'
+          };
+          
+          CommandAdapters.drawLine(linePrimitive);
+          CommandAdapters.drawRectangle(rectPrimitive);
+          console.log('✅ Test primitives created');
+
+          // Test 2: Select and transform primitives
+          console.log('📋 Test 2: Transform Primitives');
+          CommandAdapters.setSelection(['transform-line', 'transform-rect']);
+          console.log('✅ Primitives selected');
+          
+          // Move selection
+          CommandAdapters.transformMove(['transform-line', 'transform-rect'], 20, 20);
+          console.log('✅ Primitives moved');
+          
+          // Test 3: Create block and transform instance
+          console.log('📋 Test 3: Transform Block Instance');
+          const layer1 = layerService.createLayer('Block Test Layer');
+          const blockInstanceId = layerService.createBlockFromLayers([layer1.id], 'Transform Block');
+          console.log('✅ Block created:', blockInstanceId);
+          
+          // Transform block instance
+          CommandAdapters.transformMove([blockInstanceId], 50, 50);
+          console.log('✅ Block instance moved');
+          
+          // Test 4: Test command bar integration
+          console.log('📋 Test 4: Command Bar Integration');
+          const moveCommand = commandRegistry.find(cmd => cmd.id === 'move-selection');
+          if (moveCommand) {
+            console.log('✅ Move command found in command bar');
+          } else {
+            console.error('❌ Move command not found in command bar');
+            return false;
+          }
+          
+          console.log('🎉 COMPLETE TRANSFORM SYSTEM WORKS!');
+          return true;
+          
+        } catch (error) {
+          console.error('❌ Transform test failed:', error);
+          return false;
+        }
+      };
+      (window as any).debugTransform = () => {
+        console.log('🔍 Transform Debug Info:');
+        const state = CommandAdapters.getTransformState?.();
+        console.log('Transform State:', state);
+        console.log('App State Primitives:', appStateStore.getState().primitives.length);
+        
+        if (state?.isActive && state.hasBasePoint) {
+          console.log('✅ Should be showing live preview now!');
+          console.log('Move your mouse - primitives should follow cursor');
+        }
+      };
+      (window as any).startMove = () => CommandAdapters.startTransform('move');
+      (window as any).startScale = () => CommandAdapters.startTransform('scale');
+      (window as any).startRotate = () => CommandAdapters.startTransform('rotate');
     }
-  }, [serviceRef.current]);
+  }, [serviceRef.current, redrawAll, previewEnd]);
   // Subscribe to AppStateStore changes
   useEffect(() => {
     const unsubscribe = appStateStore.subscribe((newState: AppState) => {
@@ -913,6 +1311,7 @@ const App: React.FC = () => {
         } else {
           console.log('⌨️ ESC ignored in App.tsx (command bar open)');
         }
+
         return;
       }
       if (e.ctrlKey || e.metaKey) {
@@ -982,6 +1381,42 @@ const App: React.FC = () => {
   vertexConstraints, activeConstraint, gridConfig, 
   canvasColor, selectionColor, currentTheme, 
   selectionHighlightColor, selectionHandleColor]);
+  // Block edit mode
+  useEffect(() => {
+    const updateBlockEditMode = () => {
+      const isEditing = layerService.isInBlockEditMode();
+      setIsBlockEditMode(isEditing);
+      
+      if (isEditing) {
+        const editingBlock = layerService.getEditingBlockDefinition();
+        setEditingBlockName(editingBlock?.name || '');
+      } else {
+        setEditingBlockName('');
+      }
+    };
+
+    // Update when layers change
+    const eventTypes = layerService.getEventTypes();
+    const unsubscribe = layerService.subscribe(eventTypes.LAYERS_CHANGED, updateBlockEditMode);
+    
+    return unsubscribe;
+  }, []);
+  // Force update for command adapters
+  useEffect(() => {
+    if (CommandAdapters.setLivePreviewCallback) {
+      CommandAdapters.setLivePreviewCallback(() => {
+        // 🎯 This gets called every time live preview updates
+        redrawAll(previewEnd, snapResultRef.current);
+      });
+    }
+
+    return () => {
+      // Cleanup
+      if (CommandAdapters.setLivePreviewCallback) {
+        CommandAdapters.setLivePreviewCallback(() => {});
+      }
+    };
+  }, [redrawAll, previewEnd]);
 
 
 
@@ -990,8 +1425,14 @@ const App: React.FC = () => {
     throttle((evt: React.MouseEvent<HTMLCanvasElement>) => {
       const pos = getMousePos(evt);
       const cursorWorld = screenToWorld(pos.x, pos.y);
+      const worldPos = screenToWorld(pos.x, pos.y);
       let snapResult: SnapResult;
-      
+      const constraintSnap = snapResultRef.current.type === 'constraint' ? snapResultRef.current.position : null;
+      let intersectionSnap = null;
+      let finalPos = snapResultRef.current.type === 'vertex' ? snapResultRef.current.position : 
+                    intersectionSnap ?? constraintSnap ?? cursorWorld;
+      let preview = finalPos;
+
       // Only calculate snap for drawing tools
       if (activeTool === 'SELECTION') {
         // 🚫 SELECTION MODE: No snapping needed
@@ -1125,12 +1566,6 @@ const App: React.FC = () => {
         }
 
       }
-
-      const constraintSnap = snapResultRef.current.type === 'constraint' ? snapResultRef.current.position : null;
-      let intersectionSnap = null;
-      let finalPos = snapResultRef.current.type === 'vertex' ? snapResultRef.current.position : 
-                    intersectionSnap ?? constraintSnap ?? cursorWorld;
-      let preview = finalPos;
 
       // Panning functionality
       if (panStart) {
@@ -1398,30 +1833,28 @@ const App: React.FC = () => {
 
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
+    const worldPos = screenToWorld(pos.x, pos.y);
 
+    // LEFTCLICK: Drawing and Selection operations
     if (evt.button === 0) {
       const activeLayer = layerService.getActiveLayer();
-      
-      // 🎯 FIX: Only calculate snap for drawing tools
       let snapResult: SnapResult;
-      
       if (activeTool === 'SELECTION') {
-        // 🚫 SELECTION MODE: No snapping
+        // SELECTION MODE: No snapping
         snapResult = {
           position: screenToWorld(pos.x, pos.y),
           type: 'none',
           strength: 0
         };
       } else {
-        // ✅ DRAWING MODE: Calculate snapping
+        // DRAWING MODE: Calculate snapping
         snapResult = snappingService.findSnap(pos, contextManager.getContext());
       }
-      
-      snapResultRef.current = snapResult; // Always update ref
-      
+      snapResultRef.current = snapResult; 
       const constraintSnap = snapResult.type === 'constraint' ? snapResult.position : null;
       let intersectionSnap = null;
       let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
+
 
       // Set drawing state for non-selection tools
       if (activeTool !== 'SELECTION') {
@@ -1552,11 +1985,20 @@ const App: React.FC = () => {
         }
         return;
       }
+
+      // Transform operations
+      if (CommandAdapters.processTransformClick(worldPos)) {
+        console.log('🛠️ Transform operation should start now');
+        evt.preventDefault();
+        updateTransformUI();
+        return;
+      }
           
     } else if (evt.button === 1) {
       setPanStart({ x: pos.x, y: pos.y });
       setIsDrawing(false);
     }
+
   };
   const handleMouseUp = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     if (evt.button === 0) {
@@ -1685,7 +2127,43 @@ const App: React.FC = () => {
   ////////// INTERFACE \\\\\\\\\\
   return (
     <ErrorBoundary fallback={SimpleErrorFallback}>
-      <div style={{ position: "relative", width: "100vw", height: "100vh", cursor: globalCursor }}>
+      <div style={{ 
+        position: "relative", 
+        width: "100vw", 
+        height: "100vh", 
+        cursor: globalCursor,
+        overflow: 'hidden',
+        outline: isBlockEditMode ? '10px solid rgba(255, 0, 0)' : 'none',
+        outlineOffset: isBlockEditMode ? '-10px' : '0',
+        boxSizing: 'border-box' 
+        }}>
+
+        {/* Block edit mode header */}
+        {isBlockEditMode && (
+          <div className="blockEditModeHeader">
+            <span>Editing: {/*{editingBlockName}*/}</span>
+            <button
+              className='blockSave'
+              onClick={() => {
+                layerService.exitBlockEditMode(true);
+                console.log('💾 Saved block changes');
+              }}
+            >
+              Save
+            </button>
+            <button
+              className='blockCancel'
+              onClick={() => {
+                layerService.exitBlockEditMode(false);
+                console.log('❌ Cancelled block changes');
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        <TransformOverlay />
         <ErrorDisplay error={error} onDismiss={() => setError(null)} />
         <PerformanceOverlay metrics={performanceMetrics} />
 

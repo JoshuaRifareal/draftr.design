@@ -5,6 +5,9 @@ import { layerService } from './LayerService';
 import { getErrorMessage, safeSync } from '../utils/errorHandling';
 import type { Point, ConstraintType } from '../types/ToolTypes';
 
+let onLivePreviewUpdate: (() => void) | null = null;
+type TransformMode = 'move' | 'scale' | 'rotate' | null;
+
 // Add window type declaration at the top
 declare global {
   interface Window {
@@ -13,8 +16,31 @@ declare global {
   }
 }
 
+interface InteractiveTransformState {
+  mode: TransformMode;
+  targetIds: string[];
+  basePoint: Point | null;
+  previewPoint: Point | null;
+  originalPrimitives: Map<string, DrawingPrimitive>; // Store original state for preview
+  originalTransforms: Map<string, any>; // For block instances
+}
+
+let interactiveState: InteractiveTransformState = {
+  mode: null,
+  targetIds: [],
+  basePoint: null,
+  previewPoint: null,
+  originalPrimitives: new Map(),
+  originalTransforms: new Map()
+};
+
+
 // 🎯 ADAPTERS FOR EXISTING COMMANDS
 export const CommandAdapters = {
+
+  setLivePreviewCallback: (callback: () => void) => {
+    onLivePreviewUpdate = callback;
+  },
     
   // 🎯 DRAWING COMMANDS with type-safe error handling
   drawLine: (primitive: DrawingPrimitive) => {
@@ -194,7 +220,6 @@ export const CommandAdapters = {
     }
   },
 
-  // 🎯 SELECTION COMMANDS with type-safe error handling
   setSelection: (selectedIds: string[]) => {
     const { error } = safeSync(() => {
       const startTime = performance.now();
@@ -366,8 +391,15 @@ export const CommandAdapters = {
     if (error) {
       console.error('🚨 CommandAdapters.updateSelectionRect failed:', error);
     }
-  }
+  },
+
+
+  // TRANSFORM COMMANDS
+
 };
+
+
+
 
 // 🎯 Export for browser testing
 if (typeof window !== 'undefined') {

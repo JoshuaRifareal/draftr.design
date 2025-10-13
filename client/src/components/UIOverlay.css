@@ -41,7 +41,7 @@ html, body, #app {
   padding: 16px;
   box-sizing: border-box;
   pointer-events: none;
-  font-size: 9pt;
+  font-size: 10pt;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   color: var(--text-primary);
 
@@ -109,8 +109,8 @@ html, body, #app {
     display: flex;
     flex-direction: row-reverse;
     align-items: center;
-    gap: 5px;
-    
+    gap: 2px;
+
     .collabIcon {
       display: flex;
       align-items: center;
@@ -237,5 +237,37 @@ html, body, #app {
     background-color: var(--modeBar-bg);
     border: 1px solid var(--border-color);
     transition: all 0.3s ease-in-out;
+  }
+}
+
+.blockEditModeHeader {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 0, 0);
+  font-size: 10pt;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text-primary);
+  padding: 8px 16px;
+  border-radius: 12px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  button {
+    border: none;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  button.blockSave {
+    background-color: var(--toolButton-active-bg);
+  }
+  button.blockCancel {
+    background-color: var(--toolButton-bg);
   }
 }

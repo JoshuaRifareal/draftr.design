@@ -602,6 +602,14 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
         console.log('➕ Adding new layer via context menu');
         setIsAddingLayer(true);
         break;
+      case 'edit-block':
+        const layer = layerService.getLayer(layerId);
+        if (layer?.blockDefinitionId) {
+          layerService.enterBlockEditMode(layer.blockDefinitionId);
+        } else if (layer?.isBlockInstance && layer.blockDefinitionId) {
+          layerService.enterBlockEditMode(layer.blockDefinitionId);
+        }
+        break;
       case 'select-all-primitives':
         handleSelectAllPrimitives(layerId);
         break;
@@ -1211,6 +1219,10 @@ export const LayerPanel: React.FC<LayerPanelProps> = ({ selectedPrimitiveIds }) 
           </div>
           <div className="context-menu-item" onClick={() => handleContextMenuAction('ungroup')}>
             Ungroup
+          </div>
+          <div className="context-menu-divider" />
+          <div className="context-menu-item" onClick={() => handleContextMenuAction('edit-block')}>
+            Edit Block
           </div>
           <div className="context-menu-divider" />
           <div className="context-menu-item" onClick={() => handleContextMenuAction('duplicate')}>

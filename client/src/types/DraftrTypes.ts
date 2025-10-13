@@ -24,3 +24,4 @@ export interface SnappingContext {
     offsetX: number;
     offsetY: number;
 }
+

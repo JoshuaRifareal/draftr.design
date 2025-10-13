@@ -336,4 +336,6 @@ export const commandRegistry: Command[] = [
       return { success: true };
     }
   },
+
+
 ];

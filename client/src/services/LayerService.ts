@@ -1,6 +1,8 @@
-// services/LayerService.ts
 import { getErrorMessage } from '../utils/errorHandling';
 import type { Point } from '../types/ToolTypes';
+import type { DrawingPrimitive } from '../types/DraftrTypes';
+
+
 
 export interface LayerProperties {
     name: string;
@@ -19,22 +21,32 @@ export interface Layer {
     parentId: string | null;
     properties: LayerProperties;
     children: Layer[];
-    // 🎯 FIX: Only LAYERS have primitives, groups/blocks have empty sets
     primitiveIds: Set<string>; 
-    // Block system fields
-    blockSourceId?: string;
+    
     isBlockInstance?: boolean;
-    instancePosition?: Point; // For block instances
+    blockDefinitionId?: string;
+    instanceTransform?: {
+        position: Point;
+        rotation: number; // radians
+        scale: number;
+    };
+    propertyOverrides?: Partial<LayerProperties>;
 }
 
 export interface BlockDefinition {
     id: string;
     name: string;
-    sourceLayerId: string;
-    layerHierarchy: Layer[];
-    primitiveIds: Set<string>; // Shared primitives across all instances
-    instanceIds: Set<string>;
-    instanceCounter: number; // For auto-naming
+    sourceHierarchy: Layer[];
+    sourcePrimitives: DrawingPrimitive[];
+    instances: Set<string>;
+    version: number;
+    boundingBox: {
+        minX: number;
+        minY: number;
+        maxX: number;
+        maxY: number;
+        center: Point;
+    };
 }
 
 export class LayerService {
@@ -66,10 +78,22 @@ export class LayerService {
         IMAGES: 'Images'
     };
 
+    // Block edit mode state
+    private blockEditMode: {
+        isActive: boolean;
+        blockDefinitionId: string | null;
+        originalState: any; 
+    } = {
+        isActive: false,
+        blockDefinitionId: null,
+        originalState: null
+    };
+
     constructor() {
         this.initializeDefaultLayerOnly();
         console.log('🎯 Enhanced LayerService initialized');
     }
+    
 
     // ==================== CORE LAYER MANAGEMENT ====================
 
@@ -218,35 +242,6 @@ export class LayerService {
     }
     return null;
     }
-    private deleteBlockInstance(instanceId: string): void {
-        const instance = this.layers.get(instanceId);
-        if (!instance || !instance.blockSourceId) return;
-
-        const blockDef = this.blockDefinitions.get(instance.blockSourceId);
-        if (blockDef) {
-        // Remove from block definition's instance tracking
-        blockDef.instanceIds.delete(instanceId);
-        }
-
-        // 🎯 FIX: Reparent instance's child layers to instance's parent
-        const instanceParentId = instance.parentId;
-        
-        instance.children.forEach(child => {
-        child.parentId = instanceParentId;
-        
-        if (instanceParentId) {
-            const instanceParent = this.layers.get(instanceParentId);
-            if (instanceParent) {
-            instanceParent.children.push(child);
-            }
-        }
-        });
-
-        // Clear children before deletion
-        instance.children = [];
-        
-        console.log('🗑️ Block instance deleted, child layers preserved:', instanceId);
-    }
     private deleteGroupHierarchy(group: Layer): void {
         // Recursively delete all children
         group.children.forEach(child => {
@@ -329,7 +324,8 @@ export class LayerService {
         }, { layerId, updates });
     }
 
-    // ==================== BLOCK SYSTEM ====================
+
+    // ============================= BLOCK SYSTEM ====================
 
     createBlockFromLayers(layerIds: string[], blockName?: string): string {
         return this.safeOperation('createBlockFromLayers', () => {
@@ -340,89 +336,116 @@ export class LayerService {
         const blockId = this.generateLayerId('block');
         const name = blockName || `Block ${this.blockCounter++}`;
 
-        // Create block definition layer (organizational only)
-        const blockLayer = this.createLayer(name, 'block');
-        
-        // 🎯 FIX: Store mapping between layer ID and block ID
-        this.layerToBlockMap.set(blockLayer.id, blockId);
-
-        // 🎯 FIX: Set auto-edit flag for inline editing
-        this.autoEditLayerId = blockLayer.id;
-
-        // Collect all layers and their primitives
+        // 🎯 STEP 1: Collect all layers and primitives from selection
         const allLayers: Layer[] = [];
-        const allPrimitiveIds = new Set<string>();
-        
-        layerIds.forEach(layerId => {
+        const allPrimitives: DrawingPrimitive[] = [];
+        const collectedPrimitiveIds = new Set<string>();
+
+        const collectLayersAndPrimitives = (layerId: string) => {
             const layer = this.layers.get(layerId);
-            if (layer) {
+            if (!layer) return;
+
             allLayers.push(layer);
-            // Move primitives to this layer (they stay in original layers)
-            const primitives = this.getPrimitivesByLayer(layerId);
-            primitives.forEach(primId => allPrimitiveIds.add(primId));
             
-            // Reparent to block
-            this.reparentLayer(layerId, blockLayer.id);
+            // Collect primitives from this layer
+            if (layer.type === 'layer') {
+            layer.primitiveIds.forEach(primitiveId => {
+                if (!collectedPrimitiveIds.has(primitiveId)) {
+                collectedPrimitiveIds.add(primitiveId);
+                // 🎯 Get primitive data from app state
+                const primitive = this.getPrimitiveById(primitiveId);
+                if (primitive) {
+                    allPrimitives.push(primitive);
+                }
+                }
+            });
             }
-        });
 
-        // Create deep copy of hierarchy for block definition
-        const hierarchyCopy = this.deepCopyLayerHierarchy(blockLayer);
+            // Recursively collect from children
+            layer.children.forEach(child => collectLayersAndPrimitives(child.id));
+        };
 
-        // Create block definition
+        layerIds.forEach(layerId => collectLayersAndPrimitives(layerId));
+
+        // 🎯 STEP 2: Calculate bounding box
+        const boundingBox = this.calculateBoundingBox(allPrimitives);
+
+        // 🎯 STEP 3: Create block definition
         const blockDef: BlockDefinition = {
             id: blockId,
             name,
-            sourceLayerId: blockLayer.id,
-            layerHierarchy: hierarchyCopy,
-            primitiveIds: allPrimitiveIds,
-            instanceIds: new Set(),
-            instanceCounter: 1
+            sourceHierarchy: this.deepCopyLayerHierarchy(allLayers),
+            sourcePrimitives: allPrimitives.map(p => ({ ...p })), // Deep copy
+            instances: new Set(),
+            version: 1,
+            boundingBox
         };
 
         this.blockDefinitions.set(blockId, blockDef);
-        
+
+        // 🎯 STEP 4: Create block instance (replaces original layers)
+        const instanceLayer = this.createLayer(name, 'block');
+        instanceLayer.isBlockInstance = true;
+        instanceLayer.blockDefinitionId = blockId;
+        instanceLayer.instanceTransform = {
+            position: { x: 0, y: 0 },
+            rotation: 0,
+            scale: 1
+        };
+
+        // 🎯 STEP 5: Remove original layers
+        layerIds.forEach(layerId => {
+            this.deleteLayer(layerId); // This will clean up primitives from original layers
+        });
+
+        // 🎯 STEP 6: Track instance
+        blockDef.instances.add(instanceLayer.id);
+
         console.log('🧱 Block created:', { 
             blockId, 
-            sourceLayerId: blockLayer.id,
             name, 
-            layers: allLayers.length 
+            layers: allLayers.length,
+            primitives: allPrimitives.length,
+            boundingBox 
         });
-        
+
         this.notifyListeners(this.EVENT_TYPES.BLOCK_DEFINITIONS_CHANGED);
         this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
-        return blockLayer.id;
+        return instanceLayer.id;
         }, { layerIds, blockName });
     }
-    instantiateBlock(blockId: string, position: Point): string {
+    instantiateBlock(blockDefinitionId: string, position: Point): string {
         return this.safeOperation('instantiateBlock', () => {
-            const blockDef = this.blockDefinitions.get(blockId);
-            if (!blockDef) {
-                throw new Error(`Block definition not found: ${blockId}`);
-            }
+        const blockDef = this.blockDefinitions.get(blockDefinitionId);
+        if (!blockDef) {
+            throw new Error(`Block definition not found: ${blockDefinitionId}`);
+        }
 
-            const instanceId = this.generateLayerId();
-            const instanceName = `${blockDef.name} Instance ${blockDef.instanceCounter++}`;
-            
-            // Create instance layer (organizational)
-            const instanceLayer = this.createLayer(instanceName, 'block');
-            instanceLayer.isBlockInstance = true;
-            instanceLayer.blockSourceId = blockId;
-            instanceLayer.instancePosition = position;
+        // Create instance layer
+        const instanceId = this.generateLayerId();
+        const instanceName = `${blockDef.name} Instance ${blockDef.instances.size + 1}`;
+        
+        const instanceLayer = this.createLayer(instanceName, 'block');
+        instanceLayer.isBlockInstance = true;
+        instanceLayer.blockDefinitionId = blockDefinitionId;
+        instanceLayer.instanceTransform = {
+            position: { ...position },
+            rotation: 0,
+            scale: 1
+        };
 
-            // Link to the block definition's hierarchy
-            const instanceHierarchy = blockDef.layerHierarchy;
-            
-            // Add all instance layers to the main layers map
-            this.addHierarchyToLayers(instanceHierarchy, instanceLayer.id);
+        // Track instance
+        blockDef.instances.add(instanceLayer.id);
 
-            // Track instance
-            blockDef.instanceIds.add(instanceLayer.id);
+        console.log('📦 Block instantiated:', { 
+            blockDefinitionId, 
+            instanceId: instanceLayer.id,
+            position 
+        });
 
-            console.log('📦 Block instantiated:', { blockId, instanceId, position });
-            this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
-            return instanceLayer.id;
-        }, { blockId, position });
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        return instanceLayer.id;
+        }, { blockDefinitionId, position });
     }
     private updateBlockInstancesOptimized(blockId: string, updates: Partial<LayerProperties>): void {
         const blockDef = this.blockDefinitions.get(blockId);
@@ -437,6 +460,335 @@ export class LayerService {
             }
         });
     }
+    private getPrimitiveById(primitiveId: string): DrawingPrimitive | null {
+        if (typeof (window as any).appStateStore !== 'undefined') {
+        const appStateStore = (window as any).appStateStore;
+        const state = appStateStore.getState();
+        return state.primitives.find((p: DrawingPrimitive) => p.id === primitiveId) || null;
+        }
+        return null;
+    }
+    private calculateBoundingBox(primitives: DrawingPrimitive[]): BlockDefinition['boundingBox'] {
+        if (primitives.length === 0) {
+        return { minX: 0, minY: 0, maxX: 100, maxY: 100, center: { x: 50, y: 50 } };
+        }
+
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+        primitives.forEach(primitive => {
+        // Extract coordinates based on primitive type
+        const coords = this.extractPrimitiveCoordinates(primitive);
+        coords.forEach(point => {
+            minX = Math.min(minX, point.x);
+            minY = Math.min(minY, point.y);
+            maxX = Math.max(maxX, point.x);
+            maxY = Math.max(maxY, point.y);
+        });
+        });
+
+        const center = {
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2
+        };
+
+        return { minX, minY, maxX, maxY, center };
+    }
+    private extractPrimitiveCoordinates(primitive: DrawingPrimitive): Point[] {
+        const points: Point[] = [];
+        
+        switch (primitive.type) {
+        case 'line':
+            // [x1, y1, x2, y2, ...]
+            points.push({ x: primitive.data[0], y: primitive.data[1] });
+            points.push({ x: primitive.data[2], y: primitive.data[3] });
+            break;
+        case 'rectangle':
+            // [x1, y1, x2, y2, ...]
+            points.push({ x: primitive.data[0], y: primitive.data[1] });
+            points.push({ x: primitive.data[2], y: primitive.data[3] });
+            break;
+        case 'circle':
+            // [centerX, centerY, radius, ...]
+            const [cx, cy, radius] = primitive.data;
+            points.push({ x: cx - radius, y: cy - radius });
+            points.push({ x: cx + radius, y: cy + radius });
+            break;
+        }
+        
+        return points;
+    }
+    getBlockDefinition(blockId: string): BlockDefinition | undefined {
+        return this.blockDefinitions.get(blockId);
+    }
+    getAllBlockDefinitions(): BlockDefinition[] {
+        return Array.from(this.blockDefinitions.values());
+    }
+    getBlockInstances(blockDefinitionId: string): string[] {
+        const blockDef = this.blockDefinitions.get(blockDefinitionId);
+        return blockDef ? Array.from(blockDef.instances) : [];
+    }
+    private removeBlockInstance(blockSourceId: string, instanceId: string): void {
+        const blockDef = this.blockDefinitions.get(blockSourceId);
+        if (blockDef) {
+        blockDef.instanceIds.delete(instanceId);
+        console.log('🔗 Block instance removed from definition:', instanceId);
+        }
+    }
+    deleteBlockDefinition(blockDefinitionId: string): boolean {
+        return this.safeOperation('deleteBlockDefinition', () => {
+        const blockDef = this.blockDefinitions.get(blockDefinitionId);
+        if (!blockDef) {
+            throw new Error(`Block definition not found: ${blockDefinitionId}`);
+        }
+
+        console.log('🗑️ Deleting block definition:', { 
+            blockDefinitionId, 
+            name: blockDef.name,
+            instances: blockDef.instances.size 
+        });
+
+        // 🎯 STEP 1: Delete all instances
+        blockDef.instances.forEach(instanceId => {
+            this.deleteBlockInstance(instanceId);
+        });
+
+        // 🎯 STEP 2: Delete source hierarchy layers
+        this.deleteLayerHierarchy(blockDef.sourceHierarchy);
+
+        // 🎯 STEP 3: Remove block definition
+        this.blockDefinitions.delete(blockDefinitionId);
+
+        console.log('✅ Block definition deleted:', blockDefinitionId);
+        this.notifyListeners(this.EVENT_TYPES.BLOCK_DEFINITIONS_CHANGED);
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        return true;
+        }, { blockDefinitionId });
+    }
+    explodeBlockDefinition(blockDefinitionId: string): string {
+        return this.safeOperation('explodeBlockDefinition', () => {
+        const blockDef = this.blockDefinitions.get(blockDefinitionId);
+        if (!blockDef) {
+            throw new Error(`Block definition not found: ${blockDefinitionId}`);
+        }
+
+        console.log('💥 Exploding block definition:', { 
+            blockDefinitionId, 
+            name: blockDef.name,
+            instances: blockDef.instances.size 
+        });
+
+        // 🎯 STEP 1: Delete all instances
+        blockDef.instances.forEach(instanceId => {
+            this.deleteBlockInstance(instanceId);
+        });
+
+        // 🎯 STEP 2: Convert source hierarchy to group
+        const groupId = this.convertBlockToGroup(blockDef.sourceHierarchy, `${blockDef.name} Group`);
+
+        // 🎯 STEP 3: Remove block definition
+        this.blockDefinitions.delete(blockDefinitionId);
+
+        console.log('✅ Block definition exploded to group:', groupId);
+        this.notifyListeners(this.EVENT_TYPES.BLOCK_DEFINITIONS_CHANGED);
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        return groupId;
+        }, { blockDefinitionId });
+    }
+    deleteBlockInstance(instanceId: string): boolean {
+        return this.safeOperation('deleteBlockInstance', () => {
+        const instanceLayer = this.layers.get(instanceId);
+        if (!instanceLayer || !instanceLayer.isBlockInstance) {
+            throw new Error(`Block instance not found: ${instanceId}`);
+        }
+
+        console.log('🗑️ Deleting block instance:', { 
+            instanceId,
+            blockDefinitionId: instanceLayer.blockDefinitionId 
+        });
+
+        // 🎯 Remove from block definition tracking
+        if (instanceLayer.blockDefinitionId) {
+            const blockDef = this.blockDefinitions.get(instanceLayer.blockDefinitionId);
+            if (blockDef) {
+            blockDef.instances.delete(instanceId);
+            }
+        }
+
+        // 🎯 Delete the instance layer
+        this.deleteLayer(instanceId);
+
+        console.log('✅ Block instance deleted:', instanceId);
+        return true;
+        }, { instanceId });
+    }
+    explodeBlockInstance(instanceId: string): string {
+        return this.safeOperation('explodeBlockInstance', () => {
+        const instanceLayer = this.layers.get(instanceId);
+        if (!instanceLayer || !instanceLayer.isBlockInstance) {
+            throw new Error(`Block instance not found: ${instanceId}`);
+        }
+
+        console.log('💥 Exploding block instance:', { 
+            instanceId,
+            blockDefinitionId: instanceLayer.blockDefinitionId 
+        });
+
+        const blockDef = instanceLayer.blockDefinitionId 
+            ? this.blockDefinitions.get(instanceLayer.blockDefinitionId)
+            : null;
+
+        if (!blockDef) {
+            throw new Error(`Block definition not found for instance: ${instanceId}`);
+        }
+
+        // 🎯 STEP 1: Remove from block definition tracking
+        blockDef.instances.delete(instanceId);
+
+        // 🎯 STEP 2: Convert to group with transformed primitives
+        const groupId = this.convertBlockToGroup(
+            blockDef.sourceHierarchy, 
+            `${blockDef.name} Group`,
+            instanceLayer.instanceTransform
+        );
+
+        // 🎯 STEP 3: Apply transform to primitives in the new group
+        this.applyTransformToGroupPrimitives(groupId, instanceLayer.instanceTransform);
+
+        // 🎯 STEP 4: Delete the instance layer
+        this.deleteLayer(instanceId);
+
+        console.log('✅ Block instance exploded to group:', groupId);
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        return groupId;
+        }, { instanceId });
+    }
+    private convertBlockToGroup(
+        sourceHierarchy: Layer[], 
+        groupName: string, 
+        transform?: any
+    ): string {
+        // Create group
+        const groupLayer = this.createLayer(groupName, 'group');
+        
+        // 🎯 Deep copy the hierarchy and add to group
+        const copyHierarchy = (layers: Layer[], parentId: string) => {
+        layers.forEach(layer => {
+            const layerCopy: Layer = {
+            ...layer,
+            id: this.generateLayerId(layer.type),
+            parentId,
+            children: [],
+            primitiveIds: new Set(layer.primitiveIds)
+            };
+            
+            this.layers.set(layerCopy.id, layerCopy);
+            
+            // Add to parent's children
+            const parent = this.layers.get(parentId);
+            if (parent) {
+            parent.children.push(layerCopy);
+            }
+            
+            // Recursively copy children
+            copyHierarchy(layer.children, layerCopy.id);
+        });
+        };
+
+        copyHierarchy(sourceHierarchy, groupLayer.id);
+        return groupLayer.id;
+    }
+    private updateBlockInstances(blockId: string, updates: Partial<LayerProperties>): void {
+        const blockDef = this.blockDefinitions.get(blockId);
+        if (!blockDef) return;
+
+        blockDef.instanceIds.forEach(instanceId => {
+            const instance = this.layers.get(instanceId);
+            if (instance) {
+                instance.properties = { ...instance.properties, ...updates };
+            }
+        });
+    }
+    private deepCopyLayerHierarchy(layers: Layer[]): Layer[] {
+        return layers.map(layer => ({
+        ...layer,
+        id: this.generateLayerId(layer.type),
+        children: this.deepCopyLayerHierarchy(layer.children),
+        primitiveIds: new Set() // Clear primitive IDs in copy (primitives stored separately)
+        }));
+    }
+    enterBlockEditMode(blockDefinitionId: string): boolean {
+        return this.safeOperation('enterBlockEditMode', () => {
+        const blockDef = this.blockDefinitions.get(blockDefinitionId);
+        if (!blockDef) {
+            throw new Error(`Block definition not found: ${blockDefinitionId}`);
+        }
+
+        if (this.blockEditMode.isActive) {
+            throw new Error('Already in block edit mode');
+        }
+
+        console.log('🎬 Entering block edit mode:', { blockDefinitionId, name: blockDef.name });
+
+        // 🎯 STEP 1: Store original state for cancellation
+        this.blockEditMode.originalState = this.backupAppState();
+
+        // 🎯 STEP 2: Set edit mode state
+        this.blockEditMode.isActive = true;
+        this.blockEditMode.blockDefinitionId = blockDefinitionId;
+
+        // 🎯 STEP 3: Hide all other content, show only block definition
+        this.showOnlyBlockDefinition(blockDef);
+
+        console.log('✅ Block edit mode activated');
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        return true;
+        }, { blockDefinitionId });
+    }
+    exitBlockEditMode(saveChanges: boolean): boolean {
+        return this.safeOperation('exitBlockEditMode', () => {
+        if (!this.blockEditMode.isActive) {
+            throw new Error('Not in block edit mode');
+        }
+
+        console.log('🎬 Exiting block edit mode:', { 
+            saveChanges,
+            blockDefinitionId: this.blockEditMode.blockDefinitionId 
+        });
+
+        if (saveChanges) {
+            // 🎯 STEP 1: Save changes to block definition
+            this.saveBlockDefinitionChanges();
+            
+            // 🎯 STEP 2: Update all instances
+            this.updateAllBlockInstances();
+        } else {
+            // 🎯 STEP 1: Restore original state
+            this.restoreAppState(this.blockEditMode.originalState);
+        }
+
+        // 🎯 STEP 3: Reset edit mode
+        this.blockEditMode.isActive = false;
+        this.blockEditMode.blockDefinitionId = null;
+        this.blockEditMode.originalState = null;
+
+        // 🎯 STEP 4: Restore normal view
+        this.restoreNormalView();
+
+        console.log('✅ Block edit mode exited');
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        return true;
+        }, { saveChanges });
+    }
+    isInBlockEditMode(): boolean {
+        return this.blockEditMode.isActive;
+    }
+    getEditingBlockDefinition(): BlockDefinition | null {
+        if (!this.blockEditMode.isActive || !this.blockEditMode.blockDefinitionId) {
+        return null;
+        }
+        return this.blockDefinitions.get(this.blockEditMode.blockDefinitionId) || null;
+    }
+
 
     // ==================== GROUP MANAGEMENT ====================
 
@@ -885,7 +1237,6 @@ export class LayerService {
                color1.b === color2.b && 
                color1.a === color2.a;
     }
-
     private deleteAllPrimitivesInHierarchy(layerId: string): void {
         const layer = this.layers.get(layerId);
         if (!layer) return;
@@ -903,138 +1254,6 @@ export class LayerService {
         // Recursively delete primitives in children
         layer.children.forEach(child => this.deleteAllPrimitivesInHierarchy(child.id));
     }
-    private removeBlockInstance(blockSourceId: string, instanceId: string): void {
-        const blockDef = this.blockDefinitions.get(blockSourceId);
-        if (blockDef) {
-        blockDef.instanceIds.delete(instanceId);
-        console.log('🔗 Block instance removed from definition:', instanceId);
-        }
-    }
-    private deleteBlockDefinition(blockId: string): void {
-        console.log('🔍 DELETE BLOCK DEFINITION - Starting:', blockId);
-        
-        const blockDef = this.blockDefinitions.get(blockId);
-        if (!blockDef) {
-        console.warn('🚫 Block definition not found:', blockId);
-        return;
-        }
-
-        console.log('🔍 Found block definition:', {
-        sourceLayerId: blockDef.sourceLayerId,
-        instances: blockDef.instanceIds.size,
-        name: blockDef.name
-        });
-
-        // Get the source layer (the block definition container)
-        const sourceLayer = this.layers.get(blockDef.sourceLayerId);
-        
-        if (sourceLayer) {
-        console.log('🔍 Found source layer:', {
-            id: sourceLayer.id,
-            children: sourceLayer.children.length,
-            parentId: sourceLayer.parentId
-        });
-
-        // 🎯 FIX: Reparent all child layers to the block's parent before deletion
-        const blockParentId = sourceLayer.parentId;
-        
-        sourceLayer.children.forEach(child => {
-            console.log('🔍 Reparenting child layer:', child.id);
-            
-            // Reparent child layer to block's parent
-            child.parentId = blockParentId;
-            
-            if (blockParentId) {
-            // Add to grandparent's children
-            const grandParent = this.layers.get(blockParentId);
-            if (grandParent) {
-                grandParent.children.push(child);
-                console.log('✅ Child added to grandparent:', grandParent.id);
-            } else {
-                console.warn('🚫 Grandparent not found:', blockParentId);
-            }
-            } else {
-            console.log('✅ Child becomes root layer (no parent)');
-            }
-        });
-        
-        // Clear children from source layer before deletion
-        sourceLayer.children = [];
-        
-        // 🎯 FIX: Remove from layer-to-block mapping
-        this.layerToBlockMap.delete(sourceLayer.id);
-        
-        // Delete the source layer (block definition container)
-        this.layers.delete(sourceLayer.id);
-        console.log('✅ Source layer deleted:', sourceLayer.id);
-        } else {
-        console.warn('🚫 Source layer not found:', blockDef.sourceLayerId);
-        }
-
-        // 🎯 FIX: Delete all block instances (organizational only)
-        console.log('🔍 Deleting block instances:', blockDef.instanceIds.size);
-        blockDef.instanceIds.forEach(instanceId => {
-        const instance = this.layers.get(instanceId);
-        if (instance) {
-            console.log('🔍 Processing instance:', instanceId);
-            
-            // Reparent instance's child layers to instance's parent
-            const instanceParentId = instance.parentId;
-            
-            instance.children.forEach(child => {
-            console.log('🔍 Reparenting instance child:', child.id);
-            child.parentId = instanceParentId;
-            
-            if (instanceParentId) {
-                const instanceParent = this.layers.get(instanceParentId);
-                if (instanceParent) {
-                instanceParent.children.push(child);
-                console.log('✅ Instance child added to parent:', instanceParentId);
-                } else {
-                console.warn('🚫 Instance parent not found:', instanceParentId);
-                }
-            } else {
-                console.log('✅ Instance child becomes root layer');
-            }
-            });
-            
-            // Clear children and delete the instance
-            instance.children = [];
-            this.layers.delete(instanceId);
-            console.log('✅ Instance deleted:', instanceId);
-        } else {
-            console.warn('🚫 Instance not found:', instanceId);
-        }
-        });
-
-        // Remove the block definition
-        this.blockDefinitions.delete(blockId);
-        
-        console.log('✅ Block definition completely deleted:', blockId);
-        
-        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
-        this.notifyListeners(this.EVENT_TYPES.BLOCK_DEFINITIONS_CHANGED);
-    }
-    private updateBlockInstances(blockId: string, updates: Partial<LayerProperties>): void {
-        const blockDef = this.blockDefinitions.get(blockId);
-        if (!blockDef) return;
-
-        blockDef.instanceIds.forEach(instanceId => {
-            const instance = this.layers.get(instanceId);
-            if (instance) {
-                instance.properties = { ...instance.properties, ...updates };
-            }
-        });
-    }
-    private deepCopyLayerHierarchy(rootLayer: Layer, sourceHierarchy?: Layer[]): Layer[] {
-        if (!sourceHierarchy) {
-            // Copy the root layer's own hierarchy
-            return this.copyLayerTree([rootLayer]);
-        }
-        
-        // Copy the provided hierarchy
-        return this.copyLayerTree(sourceHierarchy);
-    }
     private copyLayerTree(layers: Layer[]): Layer[] {
         return layers.map(layer => ({
             ...layer,
@@ -1050,6 +1269,102 @@ export class LayerService {
             this.addHierarchyToLayers(layer.children, layer.id);
         });
     }
+    private applyTransformToGroupPrimitives(groupId: string, transform?: any): void {
+        if (!transform) return;
+
+        const groupLayer = this.layers.get(groupId);
+        if (!groupLayer) return;
+
+        // 🎯 Recursively apply transform to all primitives in group hierarchy
+        const transformPrimitivesInLayer = (layerId: string) => {
+        const layer = this.layers.get(layerId);
+        if (!layer) return;
+
+        // Apply transform to this layer's primitives
+        layer.primitiveIds.forEach(primitiveId => {
+            // 🎯 Transform primitive coordinates based on transform
+            // This would need to update the actual primitive data in app state
+            console.log('🔄 Transforming primitive:', primitiveId, transform);
+        });
+
+        // Recursively transform children
+        layer.children.forEach(child => transformPrimitivesInLayer(child.id));
+        };
+
+        transformPrimitivesInLayer(groupId);
+    }
+    private deleteLayerHierarchy(layers: Layer[]): void {
+        layers.forEach(layer => {
+        // Recursively delete children first
+        this.deleteLayerHierarchy(layer.children);
+        
+        // Delete this layer
+        this.layers.delete(layer.id);
+        });
+    }
+    private backupAppState(): any {
+        if (typeof (window as any).appStateStore !== 'undefined') {
+        const appStateStore = (window as any).appStateStore;
+        return {
+            primitives: [...appStateStore.getState().primitives],
+            layers: new Map(this.layers),
+            // Add other relevant state here
+        };
+        }
+        return null;
+    }
+    private restoreAppState(backup: any): void {
+        if (!backup || typeof (window as any).appStateStore === 'undefined') return;
+
+        const appStateStore = (window as any).appStateStore;
+        
+        // Restore primitives
+        appStateStore.setState({
+        ...appStateStore.getState(),
+        primitives: backup.primitives
+        });
+
+        // Restore layers
+        this.layers = new Map(backup.layers);
+    }
+    private showOnlyBlockDefinition(blockDef: BlockDefinition): void {
+        // 🎯 Implementation would:
+        // 1. Hide all current primitives
+        // 2. Show only primitives from block definition
+        // 3. Set up the layer hierarchy for editing
+        console.log('👁️ Showing block definition content:', blockDef.name);
+    }
+    private saveBlockDefinitionChanges(): void {
+        if (!this.blockEditMode.blockDefinitionId) return;
+
+        const blockDef = this.blockDefinitions.get(this.blockEditMode.blockDefinitionId);
+        if (!blockDef) return;
+
+        // 🎯 Capture current state as new block definition
+        // This would extract the current primitives and layer structure
+        console.log('💾 Saving block definition changes:', blockDef.name);
+        
+        // Increment version to track changes
+        blockDef.version++;
+    }
+    private updateAllBlockInstances(): void {
+        if (!this.blockEditMode.blockDefinitionId) return;
+
+        const blockDef = this.blockDefinitions.get(this.blockEditMode.blockDefinitionId);
+        if (!blockDef) return;
+
+        console.log('🔄 Updating all block instances:', blockDef.instances.size);
+        
+        // 🎯 This would trigger re-render of all instances with new definition
+        blockDef.instances.forEach(instanceId => {
+        console.log('Updated instance:', instanceId);
+        });
+    }
+    private restoreNormalView(): void {
+        console.log('👁️ Restoring normal view');
+        // 🎯 Implementation would show all normal content again
+    }
+
 
     // ======================== LAYER REORDER AND REPARENTING ====================
 
