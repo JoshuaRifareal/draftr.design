@@ -144,34 +144,32 @@ const App: React.FC = () => {
 
   // Custom Cursor
   const [isDrawing, setIsDrawing] = useState(false);
-  const cursor = useCursor(activeTool, shiftHeld, isDrawing, !!panStart, currentTheme);
+  const cursor = useCursor(activeTool, shiftHeld, isDrawing, !!panStart, currentTheme, appState.transformPreview.active);
   const [globalCursor, setGlobalCursor] = useState<string>(CURSORS.DEFAULT(currentTheme));
   useEffect(() => {
     const activeLayer = layerService.getActiveLayer();
     const isLayerLocked = activeLayer?.properties.locked ?? false;
+    const transformState = appState.transformPreview;
     
     let newCursor = CURSORS.DEFAULT(currentTheme);
   
-    // Tool-specific cursor overrides
-    if (panStart) {
-      newCursor = CURSORS.PANNING;
-    } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
-      newCursor = CURSORS.DISABLED;
-    } else if (activeTool === 'SELECTION' && shiftHeld) {
-      newCursor = CURSORS.SELECT_SUBTRACT(currentTheme);
-    } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
-      newCursor = CURSORS.CROSSHAIR;
-    }
-
-    // Transform tool cursor overrides
-    const transformState = appState.transformPreview;
     if (transformState.active) {
       if (!transformState.basePoint) {
         newCursor = 'pointer';
       } else {
         newCursor = 'move';
       }
+    } else if (panStart) {
+      // 🎯 REGULAR OPERATIONS (only when no transform active)
+      newCursor = CURSORS.PANNING;
+    } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
+      newCursor = CURSORS.DISABLED;
+    } else if (activeTool === 'SELECTION' && shiftHeld && transformState.basePoint) {
+      // newCursor = CURSORS.SELECT_SUBTRACT(currentTheme);
+    } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
+      newCursor = CURSORS.CROSSHAIR;
     }
+
     setGlobalCursor(newCursor);
   }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme, appState.transformPreview]);
 
@@ -415,79 +413,90 @@ const App: React.FC = () => {
   const orthoTempDisabledRef = useRef(false);
   const constraintTempDisabledRef = useRef(false);
 
-  
-  // Tranform states and overlay
+  // Tranform state
   const [transformState, setTransformState] = useState({
     isActive: false,
     mode: '' as TransformMode,
     message: ''
   });
-  const TransformOverlay: React.FC = () => {
-    if (!transformState.isActive) return null;
-    
-    return (
-      <div style={{
-        position: 'fixed',
-        top: '60px',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(0, 0, 0, 0.9)',
-        color: 'white',
-        padding: '12px 20px',
-        borderRadius: '8px',
-        fontSize: '14px',
-        zIndex: 1000,
-        backdropFilter: 'blur(10px)',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '15px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '16px' }}>🎯</span>
-          <span>{transformState.message}</span>
-        </div>
-        
-        <button 
-          onClick={() => {
-            CommandAdapters.cancelTransform();
-            setTransformState({ isActive: false, mode: null, message: '' });
-          }}
-          style={{
-            background: 'rgba(255, 0, 0, 0.7)',
-            border: 'none',
-            color: 'white',
-            padding: '4px 12px',
-            borderRadius: '4px',
-            cursor: 'pointer',
-            fontSize: '12px'
-          }}
-        >
-          Cancel (ESC/RClick)
-        </button>
-      </div>
-    );
-  };
-  const updateTransformUI = () => {
+  const updateTransformUI = useCallback(() => {
     const transformInfo = CommandAdapters.getTransformState();
     
     if (transformInfo.isActive) {
       let message = '';
       
       if (!transformInfo.hasBasePoint) {
-        message = `Click base point for ${transformInfo.mode}...`;
+        message = `Click anywhere to define base point.`;
       } else {
-        message = `Click destination point - ${transformInfo.mode} preview active`;
+        message = `Click to define destination point. Esc to cancel.`;
       }
       
-      setTransformState({ 
-        isActive: true, 
-        mode: transformInfo.mode,
-        message 
+      showMessage(message, () => {
+        CommandAdapters.cancelTransform();
+        hideMessage();
       });
     } else {
-      setTransformState({ isActive: false, mode: null, message: '' });
+      hideMessage();
     }
+  }, []);
+
+  // Message Overlay
+  const MessageOverlay: React.FC<{
+    isActive: boolean;
+    message: string;
+    onCancel?: () => void;
+    cancelText?: string;
+  }> = ({ isActive, message, onCancel, cancelText = "Cancel" }) => {
+    if (!isActive) return null;
+    
+    return (
+      <div className='messageOverlay' style={{
+        opacity: isActive ? 1 : 0,
+        transform: `translateX(-50%) translateY(${isActive ? '0px' : '20px'})`,
+        pointerEvents: isActive ? 'auto' : 'none'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+          <span>{message}</span>
+        </div>
+        
+        {onCancel && (
+          <button 
+            onClick={onCancel}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 0, 0, 0.9)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 0, 0, 0.7)'}
+          >
+            {cancelText}
+          </button>
+        )}
+      </div>
+    );
+  };
+  const [messageOverlay, setMessageOverlay] = useState<{
+    isActive: boolean;
+    message: string;
+    onCancel?: () => void;
+    cancelText?: string;
+  }>({
+    isActive: false,
+    message: '',
+    onCancel: undefined,
+    cancelText: "Cancel"
+  });
+  const showMessage = (message: string, onCancel?: () => void, cancelText?: string) => {
+    setMessageOverlay({
+      isActive: true,
+      message,
+      onCancel,
+      cancelText
+    });
+  };
+  const hideMessage = () => {
+    setMessageOverlay({
+      isActive: false,
+      message: '',
+      onCancel: undefined,
+      cancelText: "Cancel"
+    });
   };
 
 
@@ -578,7 +587,6 @@ const App: React.FC = () => {
       (window as any).CommandAdapters = CommandAdapters;
       (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
       
-    
       // Snap result ref for testing
       (window as any).snapResultRef = snapResultRef;
       (window as any).CommandAdapters.snapResultRef = snapResultRef;
@@ -1310,6 +1318,7 @@ const App: React.FC = () => {
         
         return transform;
       };
+      (window as any).updateTransformUI = updateTransformUI;
 
       // Quick access commands for manual testing
       (window as any).startMove = () => {
@@ -1324,8 +1333,12 @@ const App: React.FC = () => {
         CommandAdapters.startTransform('rotate');
         console.log('🔄 Rotate transform started - click base point');
       };
+
+      // Message overlay
+      (window as any).showMessage = showMessage;
+      (window as any).hideMessage = hideMessage;
     }
-  }, [serviceRef.current, redrawAll, previewEnd, snapResultRef]);
+  }, [serviceRef.current, redrawAll, previewEnd, snapResultRef, showMessage, hideMessage]);
   // Subscribe to AppStateStore changes
   useEffect(() => {
     const unsubscribe = appStateStore.subscribe((newState: AppState) => {
@@ -1512,15 +1525,33 @@ const App: React.FC = () => {
         if (!isCommandBarOpen) {
           e.preventDefault();
           e.stopPropagation();
-          e.stopImmediatePropagation(); // 🎯 CRITICAL: Stop other listeners
+          e.stopImmediatePropagation();
+          const currentState = appStateStore.getState();
+
+          // 🎯 PRIORITY 1: Cancel active transform
+          if (currentState.transformPreview.active) {
+            console.log('⌨️ ESC: Cancelling active transform');
+            CommandAdapters.cancelTransform();
+            updateTransformUI();
+          }
           
-          console.log('⌨️ ESC handled in App.tsx (command bar closed)');
-          CommandAdapters.setSelection([]);
-          CommandAdapters.setActiveTool('SELECTION');
-          resetTool();
+          // 🎯 PRIORITY 2: Clear selection if anything is selected
+          if (currentState.selectedPrimitiveIds.length > 0) {
+            console.log('⌨️ ESC: Clearing selection');
+            CommandAdapters.setSelection([]);
+          }
+          
+          // 🎯 PRIORITY 3: Reset to selection tool if using other tool
+          if (currentState.activeTool !== 'SELECTION') {
+            console.log('⌨️ ESC: Resetting to selection tool');
+            CommandAdapters.setActiveTool('SELECTION');
+            resetTool();
+          }
+
         } else {
           console.log('⌨️ ESC ignored in App.tsx (command bar open)');
         }
+        
 
         return;
       }
@@ -1652,7 +1683,8 @@ const App: React.FC = () => {
         
         setIsDrawing(false);
         setPanStart({ x: pos.x, y: pos.y });
-        debouncedRedraw(previewEnd, snapResultRef.current);
+        redrawAll(previewEnd, snapResultRef.current);
+        // debouncedRedraw(previewEnd, snapResultRef.current);
         return;
       }
 
@@ -1798,7 +1830,6 @@ const App: React.FC = () => {
 
       }
 
-
       // Selection rectangle - IMMEDIATE updates
       if (activeTool === 'SELECTION' && selectionStart) {
         CommandAdapters.updateSelectionRect(selectionStart, cursorWorld);
@@ -1884,7 +1915,7 @@ const App: React.FC = () => {
 
       CommandAdapters.updatePreview(preview);
       debouncedRedraw(preview, snapResultRef.current);
-    }, 8),
+    }, 16),
     [
       panStart, activeTool, selectionStart, currentStart, scale, offsetX, offsetY,
       screenToWorld, snappingService, debouncedRedraw, previewEnd,
@@ -2176,16 +2207,6 @@ const App: React.FC = () => {
       
       let newCursor = CURSORS.DEFAULT(newTheme);
       
-      if (panStart) {
-        newCursor = CURSORS.PANNING;
-      } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
-        newCursor = CURSORS.DISABLED;
-      } else if (activeTool === 'SELECTION' && shiftHeld) {
-        newCursor = CURSORS.SELECT_SUBTRACT(newTheme);
-      } else {
-        newCursor = CURSORS.DEFAULT(newTheme);
-      }
-      
       console.log('🎯 Immediate cursor update:', newCursor);
       canvasRef.current.style.cursor = newCursor;
     }
@@ -2244,7 +2265,12 @@ const App: React.FC = () => {
           </div>
         )}
 
-        <TransformOverlay />
+        <MessageOverlay
+          isActive={messageOverlay.isActive}
+          message={messageOverlay.message}
+          onCancel={messageOverlay.onCancel}
+          cancelText={messageOverlay.cancelText}
+        />
         <ErrorDisplay error={error} onDismiss={() => setError(null)} />
         <PerformanceOverlay metrics={performanceMetrics} />
 

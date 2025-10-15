@@ -7,7 +7,8 @@ export const useCursor = (
   shiftHeld: boolean, 
   isDrawing: boolean, 
   isPanning: boolean,
-  theme: 'dark' | 'light'
+  theme: 'dark' | 'light',
+  isTransformActive: boolean = false
 ) => {
   const [cursor, setCursor] = useState<string>(CURSORS.DEFAULT(theme));
 
@@ -25,14 +26,14 @@ export const useCursor = (
       return;
     }
 
-    if (activeTool === 'SELECTION' && shiftHeld) {
+    if (activeTool === 'SELECTION' && shiftHeld && !isTransformActive) {
       setCursor(CURSORS.SELECT_SUBTRACT(theme));
     } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
       setCursor(CURSORS.CROSSHAIR); // 🎯 Built-in crosshair
     } else {
       setCursor(CURSORS.DEFAULT(theme));
     }
-  }, [activeTool, shiftHeld, isDrawing, isPanning, theme]);
+  }, [activeTool, shiftHeld, isDrawing, isPanning, theme, isTransformActive]);
 
   return cursor;
 };

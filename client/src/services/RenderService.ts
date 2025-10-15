@@ -301,7 +301,11 @@ export class RenderService {
       
       const nearest = this.nearestOrthoAngleDeg(guideStart, guideEnd, orthoAnglesDeg);
       
-      if (nearest.diff <= orthoThresholdDeg) {
+      const shouldDrawOrthoGuide = 
+        snapResult.type === 'ortho' || // We have an ortho snap
+        (!params.transformPreview?.active && nearest.diff <= orthoThresholdDeg); // Drawing mode
+        
+      if (shouldDrawOrthoGuide && nearest.diff <= orthoThresholdDeg) {
         const rad = (nearest.angle * Math.PI) / 180;
         this.drawOrthoGuide(guideStart.x, guideStart.y, rad);
       }

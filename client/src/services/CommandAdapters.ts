@@ -424,11 +424,12 @@ export const CommandAdapters = {
           targetIds: finalTargetIds,
           basePoint: null,
           previewPoint: null,
-          // 🎯 REMOVE previousPoint - we don't need it anymore
+          previousPoint: null,
           originalPrimitives: originalPrimitives
         }
       });
 
+      triggerTransformUIUpdate()
       console.log(`🎯 Transform started: ${mode} on ${finalTargetIds.length} primitives`);
     });
 
@@ -532,6 +533,10 @@ export const CommandAdapters = {
         offsetX: currentState.offsetX,
         offsetY: currentState.offsetY
       };
+
+      snappingService.updateConfig({
+        orthoEnabled: shiftHeld // 🎯 Only enable ortho when shift held
+      });
       
       // Find snap result (only on non-selected geometry)
       const snapResult = snappingService.findSnap(screenPos, context);
@@ -577,7 +582,6 @@ export const CommandAdapters = {
         transformPreview: {
           ...transformState,
           previewPoint: finalWorldPos
-          // 🎯 REMOVE previousPoint - we always calculate from base point
         }
       });
 
@@ -691,6 +695,7 @@ export const CommandAdapters = {
       console.error('🚨 CommandAdapters.cancelTransform failed:', error);
     }
   },
+  
 
   // Actual transform execution commands (undoable)
   transformMove: (targetIds: string[], deltaX: number, deltaY: number) => {
@@ -959,6 +964,13 @@ const applyRotation = (primitive: DrawingPrimitive, angle: number, basePoint: Po
   }
   
   return newPrimitive;
+};
+const triggerTransformUIUpdate = () => {
+  if (typeof (window as any).updateTransformUI === 'function') {
+    (window as any).updateTransformUI();
+  } else {
+    console.warn('⚠️ updateTransformUI not available on window');
+  }
 };
 
 

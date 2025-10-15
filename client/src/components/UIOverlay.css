@@ -88,7 +88,7 @@ html, body, #app {
     color: var(--text-primary);
     background-color: var(--mainMenu-bg);
     font-weight: bold;
-    font-size: 12px;
+    font-size: 10pt;
 
     img {
       height: 40%;
@@ -269,5 +269,40 @@ html, body, #app {
   }
   button.blockCancel {
     background-color: var(--toolButton-bg);
+  }
+}
+
+.messageOverlay {
+  width: auto;
+  max-width: 450px;
+  min-width: 200px;
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  background: #23232b;
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 10pt;
+  padding: 12px 20px;
+  border-radius: 16px;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  white-space: nowrap;
+  transition: all 1.0s cubic-bezier(0.4, 0, 0.2, 1);
+
+  button {
+    background: rgba(255, 0, 0, 0.7);
+    border: none;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    flex-shrink: 0;
+    transition: background 0.2s ease;
   }
 }
