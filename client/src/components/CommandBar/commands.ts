@@ -2,7 +2,7 @@ import { CommandAdapters } from '../../services/CommandAdapters';
 import { appStateStore } from '../../services/AppStateStore';
 import { getErrorMessage, safeAsync } from '../../utils/errorHandling';
 
-// Command interface - SIMPLIFIED (no context parameter)
+// Command interface
 export interface Command {
   id: string;
   name: string;
@@ -143,9 +143,10 @@ const calculateMatchScore = (text: string, query: string): { score: number; matc
   return { score: 0, matchType: 'contains' };
 };
 
-// SIMPLIFIED COMMAND REGISTRY - Using CommandAdapters directly
+// COMMAND REGISTRY - Using CommandAdapters directly
 export const commandRegistry: Command[] = [
-  // Tools - SIMPLIFIED
+
+  // Tools
   {
     id: 'selection-tool',
     name: 'Selection Tool',
@@ -227,7 +228,7 @@ export const commandRegistry: Command[] = [
     }
   },
 
-  // View commands - SIMPLIFIED
+  // View commands
   {
     id: 'zoom-in',
     name: 'Zoom In',
@@ -294,7 +295,7 @@ export const commandRegistry: Command[] = [
     }
   },
 
-  // Edit commands - SIMPLIFIED
+  // Edit commands
   {
     id: 'clear-canvas',
     name: 'Clear Canvas',
@@ -337,5 +338,113 @@ export const commandRegistry: Command[] = [
     }
   },
 
+  // Transform commands
+  {
+    id: 'move-selection',
+    name: 'Move Selection',
+    description: 'Move selected objects to new position',
+    category: 'edit',
+    aliases: ['move', 'mv', 'translate', 'drag', 'shift', 'relocate', 'position'],
+    execute: async () => {
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        
+        if (currentState.selectedPrimitiveIds.length === 0) {
+          throw new Error('No objects selected to move');
+        }
+        
+        CommandAdapters.startTransform('move');
+        return { success: true, message: 'Move transform started - click base point' };
+      }, { success: false, message: 'Move command failed' }); // 🎯 FIX: Add message property
 
+      if (error) {
+        console.error('🚨 move-selection command failed:', error);
+        return { success: false, error };
+      }
+      
+      return { success: true, message: 'Move transform started' };
+    }
+  },
+
+  {
+    id: 'scale-selection',
+    name: 'Scale Selection', 
+    description: 'Resize selected objects',
+    category: 'edit',
+    aliases: ['scale', 'resize', 'size', 'zoom', 'enlarge', 'shrink', 'stretch'],
+    execute: async () => {
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        
+        if (currentState.selectedPrimitiveIds.length === 0) {
+          throw new Error('No objects selected to scale');
+        }
+        
+        CommandAdapters.startTransform('scale');
+        return { success: true, message: 'Scale transform started - click base point' };
+      }, { success: false, message: 'Scale command failed' }); // 🎯 FIX: Add message property
+
+      if (error) {
+        console.error('🚨 scale-selection command failed:', error);
+        return { success: false, error };
+      }
+      
+      return { success: true, message: 'Scale transform started' };
+    }
+  },
+
+  {
+    id: 'rotate-selection',
+    name: 'Rotate Selection',
+    description: 'Rotate selected objects',
+    category: 'edit',
+    aliases: ['rotate', 'turn', 'spin', 'pivot', 'revolve', 'angle'],
+    execute: async () => {
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        
+        if (currentState.selectedPrimitiveIds.length === 0) {
+          throw new Error('No objects selected to rotate');
+        }
+        
+        CommandAdapters.startTransform('rotate');
+        return { success: true, message: 'Rotate transform started - click base point' };
+      }, { success: false, message: 'Rotate command failed' }); // 🎯 FIX: Add message property
+
+      if (error) {
+        console.error('🚨 rotate-selection command failed:', error);
+        return { success: false, error };
+      }
+      
+      return { success: true, message: 'Rotate transform started' };
+    }
+  },
+
+  {
+    id: 'move-tool',
+    name: 'Move Tool',
+    description: 'Activate move transformation tool',
+    category: 'tools',
+    aliases: ['movetool', 'movet', 'mtool'],
+    execute: async () => {
+      const { error } = await safeAsync(async () => {
+        const currentState = appStateStore.getState();
+        if (currentState.selectedPrimitiveIds.length === 0) {
+          CommandAdapters.setActiveTool('SELECTION');
+          return { success: true, message: 'Switch to selection tool to select objects first' };
+        } else {
+          CommandAdapters.startTransform('move');
+          return { success: true, message: 'Move transform started - click base point' };
+        }
+      }, { success: false, message: 'Move tool command failed' }); // 🎯 FIX: Add message property
+
+      if (error) {
+        console.error('🚨 move-tool command failed:', error);
+        return { success: false, error };
+      }
+      
+      return { success: true, message: 'Move tool activated' };
+    }
+  },
+  
 ];

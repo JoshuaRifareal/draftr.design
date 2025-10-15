@@ -7,6 +7,8 @@ import { Renderer } from "../pkg/draftr_engine";
 import { layerService, type Layer } from './LayerService';
 import { selectionService, type Primitive } from './SelectionService';
 import { type Bounds } from '../types/ToolTypes';
+import type { DrawingPrimitive } from '../types/DraftrTypes';
+import type { Point } from '../types/ToolTypes';
 
 
 const CROSS_INDICATOR_SIZE = 10; // px
@@ -45,6 +47,16 @@ export interface RedrawParams {
   snapColor: any;
   orthoThresholdDeg: number;
   orthoAnglesDeg: number[];
+  primitives: DrawingPrimitive[];
+  transformPreview?: {
+    active: boolean;
+    mode: 'move' | 'scale' | 'rotate' | null;
+    targetIds: string[];
+    basePoint: Point | null;
+    previewPoint: Point | null;
+    originalPrimitives: DrawingPrimitive[];
+    previewPrimitives: DrawingPrimitive[];
+  };
 }
 
 export class RenderService {
@@ -251,11 +263,11 @@ export class RenderService {
     if (!this.renderer) return;
     
     const {
-        offsetX, offsetY, scale,
-        activeTool, activeConstraint, constraintColor,
-        currentStart, vertexConstraints,
-        selectedPrimitiveIds, selectionStart, selectionEnd,
-        lineColor, snapColor, orthoThresholdDeg, orthoAnglesDeg
+      offsetX, offsetY, scale,
+      activeTool, activeConstraint, constraintColor,
+      currentStart, vertexConstraints,
+      selectedPrimitiveIds, selectionStart, selectionEnd,
+      lineColor, snapColor, orthoThresholdDeg, orthoAnglesDeg
     } = params;
     
     this.setTransform(offsetX, offsetY, scale);
@@ -273,13 +285,25 @@ export class RenderService {
     }
       
     // Draw orthogonal guides next
-    if (currentStart && preview) {
-      const guidePreview = snapResult.type === 'intersection' ? snapResult.position : preview;
-      const nearest = this.nearestOrthoAngleDeg(currentStart, guidePreview, orthoAnglesDeg);
+    if ((currentStart && preview) || (params.transformPreview?.active && params.transformPreview.basePoint && params.transformPreview.previewPoint)) {
+      let guideStart: Point;
+      let guideEnd: Point;
+      
+      if (params.transformPreview?.active && params.transformPreview.basePoint && params.transformPreview.previewPoint) {
+        // 🎯 TRANSFORM MODE: Use transform preview points
+        guideStart = params.transformPreview.basePoint;
+        guideEnd = params.transformPreview.previewPoint;
+      } else {
+        // 🎯 DRAWING MODE: Use currentStart and preview
+        guideStart = currentStart!;
+        guideEnd = snapResult.type === 'intersection' ? snapResult.position : preview!;
+      }
+      
+      const nearest = this.nearestOrthoAngleDeg(guideStart, guideEnd, orthoAnglesDeg);
       
       if (nearest.diff <= orthoThresholdDeg) {
         const rad = (nearest.angle * Math.PI) / 180;
-        this.drawOrthoGuide(currentStart.x, currentStart.y, rad);
+        this.drawOrthoGuide(guideStart.x, guideStart.y, rad);
       }
     }
 
@@ -341,6 +365,11 @@ export class RenderService {
         break;
       }
     }
+
+    // Draw transform preview if active
+    if (params.transformPreview?.active) {
+      this.drawTransformPreview(params.transformPreview);
+    }
   }
 
 
@@ -384,6 +413,19 @@ export class RenderService {
       
       this.drawSelectionHighlight(primitive, true);
     });
+  }
+  private drawTransformPreview(transformPreview: RedrawParams['transformPreview']) {
+    if (!transformPreview) return;
+    
+    // Draw base point
+    if (transformPreview.basePoint) {
+      this.drawCross(
+          transformPreview.basePoint.x, 
+          transformPreview.basePoint.y, 
+          CROSS_INDICATOR_SIZE,
+          1, 1, 1, 1
+        );
+    }
   }
   
   // Helper methods
@@ -515,6 +557,7 @@ export class RenderService {
 
     return { angle: bestCandidate, base: bestBase, diff: bestDiff };
   }
+
 
 
   // LOD System

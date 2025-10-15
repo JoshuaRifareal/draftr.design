@@ -25,6 +25,16 @@ export interface AppState {
   previewEnd: Point | null;
   vertexConstraints: Point[];
   activeConstraint: {x: number, y: number; type: ConstraintType} | null;
+  // Transfom system
+  transformPreview: {
+    active: boolean;
+    mode: 'move' | 'scale' | 'rotate' | null;
+    targetIds: string[];
+    basePoint: Point | null;
+    previewPoint: Point | null;
+    previousPoint: Point | null;
+    originalPrimitives: DrawingPrimitive[];
+  };
 }
 
 export interface CommandHistoryItem {
@@ -351,7 +361,16 @@ export const createInitialState = (): AppState => {
     currentStart: null,
     previewEnd: null,
     vertexConstraints: [],
-    activeConstraint: null
+    activeConstraint: null,
+    transformPreview: {
+      active: false,
+      mode: null,
+      targetIds: [],
+      basePoint: null,
+      previewPoint: null,
+      previousPoint: null,
+      originalPrimitives: [],
+    }
   };
   console.log('🆕 createInitialState called, returning:', state);
   return state;

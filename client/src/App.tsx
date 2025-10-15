@@ -152,6 +152,7 @@ const App: React.FC = () => {
     
     let newCursor = CURSORS.DEFAULT(currentTheme);
   
+    // Tool-specific cursor overrides
     if (panStart) {
       newCursor = CURSORS.PANNING;
     } else if ((activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') && isLayerLocked) {
@@ -161,8 +162,18 @@ const App: React.FC = () => {
     } else if (activeTool === 'LINE' || activeTool === 'RECTANGLE' || activeTool === 'CIRCLE') {
       newCursor = CURSORS.CROSSHAIR;
     }
+
+    // Transform tool cursor overrides
+    const transformState = appState.transformPreview;
+    if (transformState.active) {
+      if (!transformState.basePoint) {
+        newCursor = 'pointer';
+      } else {
+        newCursor = 'move';
+      }
+    }
     setGlobalCursor(newCursor);
-  }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme]);
+  }, [activeTool, shiftHeld, isDrawing, panStart, currentTheme, appState.transformPreview]);
 
   // Memoize ortho and grid config
   const orthoConfigMemo = useMemo(() => ({
@@ -186,6 +197,8 @@ const App: React.FC = () => {
     if (!serviceRef.current || !canvasRef.current) return;
     const service = serviceRef.current;
 
+    const primitivesToRender = appState.primitives;
+
     // Layer-aware redraw method
     service.redrawAll(preview, snapResultRef.current, {
       offsetX, offsetY, scale,
@@ -202,11 +215,14 @@ const App: React.FC = () => {
       snapColor,
       orthoThresholdDeg: ORTHO_THRESHOLD_DEG,
       orthoAnglesDeg: ORTHO_ANGLES_DEG,
+      primitives: primitivesToRender,
+      transformPreview: appState.transformPreview
     });
     
     const duration = performanceMonitor.endMeasurement('redrawAll', startTime);
     performanceMonitor.recordRedraw(duration);
   }, [
+    appState.primitives,
     offsetX, offsetY, scale,
     activeTool,
     activeConstraint,
@@ -453,9 +469,9 @@ const App: React.FC = () => {
     );
   };
   const updateTransformUI = () => {
-    const transformInfo = CommandAdapters.getTransformState?.();
+    const transformInfo = CommandAdapters.getTransformState();
     
-    if (transformInfo?.isActive) {
+    if (transformInfo.isActive) {
       let message = '';
       
       if (!transformInfo.hasBasePoint) {
@@ -562,6 +578,11 @@ const App: React.FC = () => {
       (window as any).CommandAdapters = CommandAdapters;
       (window as any).getUndoHistory = () => appStateStore.getDebugInfo();
       
+    
+      // Snap result ref for testing
+      (window as any).snapResultRef = snapResultRef;
+      (window as any).CommandAdapters.snapResultRef = snapResultRef;
+
       // Redraw function for testing
       (window as any).forceRedraw = () => {
         redrawAll(previewEnd, snapResultRef.current);
@@ -993,32 +1014,25 @@ const App: React.FC = () => {
       (window as any).testTransformSystem = () => {
         console.log('🧪 Testing Transform System...');
         
-        // Test 1: Transform commands exist
-        console.log('📋 Test 1: Transform Commands');
-        if (typeof CommandAdapters.transformMove === 'function') {
-          console.log('✅ transformMove command exists');
-        } else {
-          console.error('❌ transformMove command missing');
-          return false;
-        }
-        
-        if (typeof CommandAdapters.transformRotate === 'function') {
-          console.log('✅ transformRotate command exists');
-        } else {
-          console.error('❌ transformRotate command missing');
-          return false;
-        }
-        
-        if (typeof CommandAdapters.transformScale === 'function') {
-          console.log('✅ transformScale command exists');
-        } else {
-          console.error('❌ transformScale command missing');
-          return false;
-        }
-
-        // Test 2: Create test primitive and transform it
-        console.log('📋 Test 2: Transform Primitive');
         try {
+          // Test 1: Transform commands exist
+          console.log('📋 Test 1: Transform Commands');
+          if (typeof CommandAdapters.startTransform === 'function') {
+            console.log('✅ startTransform command exists');
+          } else {
+            console.error('❌ startTransform command missing');
+            return false;
+          }
+          
+          if (typeof CommandAdapters.transformMove === 'function') {
+            console.log('✅ transformMove command exists');
+          } else {
+            console.error('❌ transformMove command missing');
+            return false;
+          }
+          
+          // Test 2: Create test primitives and transform them
+          console.log('📋 Test 2: Transform Primitives');
           const testPrimitive: DrawingPrimitive = {
             id: 'transform-test-line',
             type: 'line',
@@ -1029,18 +1043,36 @@ const App: React.FC = () => {
           CommandAdapters.drawLine(testPrimitive);
           console.log('✅ Test primitive created');
           
-          // Move the primitive
-          CommandAdapters.transformMove(['transform-test-line'], 10, 10);
-          console.log('✅ Primitive moved');
+          // Select the primitive
+          CommandAdapters.setSelection(['transform-test-line']);
+          console.log('✅ Primitive selected');
           
+          // Start move transform
+          CommandAdapters.startTransform('move');
+          console.log('✅ Move transform started');
+          
+          // Test 3: Verify transform state
+          console.log('📋 Test 3: Transform State');
+          const transformState = CommandAdapters.getTransformState();
+          console.log('Transform state:', transformState);
+          
+          if (transformState.isActive && transformState.mode === 'move') {
+            console.log('✅ Transform state correct');
+          } else {
+            console.error('❌ Transform state incorrect');
+            return false;
+          }
+          
+          console.log('🎉 TRANSFORM SYSTEM TESTS PASSED!');
           return true;
+          
         } catch (error) {
           console.error('❌ Transform test failed:', error);
           return false;
         }
       };
       (window as any).testCompleteTransform = () => {
-        console.log('🧪 Testing Complete Transform System...');
+        console.log('🧪 Testing Complete Transform Workflow...');
         
         try {
           // Test 1: Create test primitives
@@ -1072,50 +1104,228 @@ const App: React.FC = () => {
           CommandAdapters.transformMove(['transform-line', 'transform-rect'], 20, 20);
           console.log('✅ Primitives moved');
           
-          // Test 3: Create block and transform instance
-          console.log('📋 Test 3: Transform Block Instance');
-          const layer1 = layerService.createLayer('Block Test Layer');
-          const blockInstanceId = layerService.createBlockFromLayers([layer1.id], 'Transform Block');
-          console.log('✅ Block created:', blockInstanceId);
+          // Test 3: Verify final positions
+          console.log('📋 Test 3: Verify Final Positions');
+          const finalState = appStateStore.getState();
+          const movedLine = finalState.primitives.find(p => p.id === 'transform-line');
+          const movedRect = finalState.primitives.find(p => p.id === 'transform-rect');
           
-          // Transform block instance
-          CommandAdapters.transformMove([blockInstanceId], 50, 50);
-          console.log('✅ Block instance moved');
-          
-          // Test 4: Test command bar integration
-          console.log('📋 Test 4: Command Bar Integration');
-          const moveCommand = commandRegistry.find(cmd => cmd.id === 'move-selection');
-          if (moveCommand) {
-            console.log('✅ Move command found in command bar');
+          if (movedLine && movedLine.data[0] === 20 && movedLine.data[1] === 20) {
+            console.log('✅ Line moved correctly');
           } else {
-            console.error('❌ Move command not found in command bar');
+            console.error('❌ Line not moved correctly');
             return false;
           }
           
-          console.log('🎉 COMPLETE TRANSFORM SYSTEM WORKS!');
+          if (movedRect && movedRect.data[0] === 70 && movedRect.data[1] === 70) {
+            console.log('✅ Rectangle moved correctly');
+          } else {
+            console.error('❌ Rectangle not moved correctly');
+            return false;
+          }
+          
+          console.log('🎉 COMPLETE TRANSFORM WORKFLOW WORKS!');
           return true;
           
         } catch (error) {
-          console.error('❌ Transform test failed:', error);
+          console.error('❌ Complete transform test failed:', error);
           return false;
         }
       };
       (window as any).debugTransform = () => {
         console.log('🔍 Transform Debug Info:');
-        const state = CommandAdapters.getTransformState?.();
+        const state = CommandAdapters.getTransformState();
         console.log('Transform State:', state);
         console.log('App State Primitives:', appStateStore.getState().primitives.length);
         
-        if (state?.isActive && state.hasBasePoint) {
+        if (state.isActive && state.hasBasePoint) {
           console.log('✅ Should be showing live preview now!');
           console.log('Move your mouse - primitives should follow cursor');
         }
       };
-      (window as any).startMove = () => CommandAdapters.startTransform('move');
-      (window as any).startScale = () => CommandAdapters.startTransform('scale');
-      (window as any).startRotate = () => CommandAdapters.startTransform('rotate');
+      (window as any).debugPreviewUpdate = (x: number, y: number) => {
+        console.log('🧪 Manually updating transform preview...');
+        CommandAdapters.updateTransformPreview({ x, y });
+        
+        // Check state after update
+        const state = appStateStore.getState();
+        console.log('Preview primitives count:', state.transformPreview.previewPrimitives.length);
+        console.log('Preview point:', state.transformPreview.previewPoint);
+        
+        if (state.transformPreview.previewPrimitives.length > 0) {
+          console.log('First preview primitive:', state.transformPreview.previewPrimitives[0]);
+        }
+      };
+      (window as any).testPreviewCalculation = () => {
+        console.log('🧪 Testing Preview Calculation...');
+        
+        try {
+          // Create a simple test primitive
+          const testPrimitive: DrawingPrimitive = {
+            id: 'debug-test',
+            type: 'line',
+            data: [100, 100, 200, 200, 1, 1, 1, 1],
+            layerId: 'Default'
+          };
+
+          console.log('🧪 Test primitive:', testPrimitive);
+
+          // Test the calculation directly using the exported helper
+          const result = (window as any).transformHelpers.calculateTransformPreview(
+            [testPrimitive],
+            'move',
+            { x: 150, y: 150 }, // base point
+            { x: 250, y: 250 }, // cursor position
+            false
+          );
+
+          console.log('🧪 Direct calculation result:', {
+            input: testPrimitive.data,
+            output: result[0]?.data,
+            success: result.length > 0
+          });
+
+          return result.length > 0;
+
+        } catch (error) {
+          console.error('❌ Preview calculation test failed:', error);
+          return false;
+        }
+      };
+      (window as any).testTranslation = () => {
+        console.log('🧪 Testing Translation Only...');
+        
+        try {
+          const testPrimitive: DrawingPrimitive = {
+            id: 'translation-test',
+            type: 'line', 
+            data: [100, 100, 200, 200, 1, 1, 1, 1],
+            layerId: 'Default'
+          };
+
+          const result = (window as any).transformHelpers.applyTranslation(
+            testPrimitive,
+            50, // deltaX
+            25  // deltaY
+          );
+
+          console.log('🧪 Translation test:', {
+            original: testPrimitive.data.slice(0, 4),
+            translated: result.data.slice(0, 4),
+            expected: [150, 125, 250, 225],
+            correct: result.data[0] === 150 && result.data[1] === 125
+          });
+
+          return result.data[0] === 150 && result.data[1] === 125;
+
+        } catch (error) {
+          console.error('❌ Translation test failed:', error);
+          return false;
+        }
+      };
+      (window as any).testFullPreviewFlow = () => {
+        console.log('🧪 Testing Full Preview Flow...');
+        
+        try {
+          // Create test primitive
+          const testPrimitive: DrawingPrimitive = {
+            id: 'flow-test',
+            type: 'line',
+            data: [100, 100, 200, 200, 1, 1, 1, 1],
+            layerId: 'Default'
+          };
+
+          // Add to canvas
+          CommandAdapters.drawLine(testPrimitive);
+          
+          // Select it
+          CommandAdapters.setSelection(['flow-test']);
+          
+          // Start transform
+          CommandAdapters.startTransform('move');
+          
+          // Set base point
+          CommandAdapters.processTransformClick({ x: 150, y: 150 });
+          
+          // Check state after base point
+          const stateAfterBase = appStateStore.getState();
+          console.log('🔍 State after base point:', {
+            active: stateAfterBase.transformPreview.active,
+            basePoint: stateAfterBase.transformPreview.basePoint,
+            originalPrimitives: stateAfterBase.transformPreview.originalPrimitives.length,
+            previewPrimitives: stateAfterBase.transformPreview.previewPrimitives.length
+          });
+          
+          // Update preview
+          CommandAdapters.updateTransformPreview({ x: 250, y: 250 });
+          
+          // Check state after preview update
+          const stateAfterPreview = appStateStore.getState();
+          console.log('🔍 State after preview update:', {
+            previewPoint: stateAfterPreview.transformPreview.previewPoint,
+            previewPrimitives: stateAfterPreview.transformPreview.previewPrimitives.length,
+            firstPreviewPrimitive: stateAfterPreview.transformPreview.previewPrimitives[0]
+          });
+          
+          // Clean up
+          CommandAdapters.cancelTransform();
+          CommandAdapters.deleteSelected(['flow-test']);
+          
+          const success = stateAfterPreview.transformPreview.previewPrimitives.length > 0;
+          console.log(success ? '✅ Full preview flow works!' : '❌ Preview primitives not generated');
+          
+          return success;
+
+        } catch (error) {
+          console.error('❌ Full preview flow test failed:', error);
+          return false;
+        }
+      };
+      (window as any).inspectTransformState = () => {
+        const state = appStateStore.getState();
+        const transform = state.transformPreview;
+        
+        console.log('🔍 Current Transform State:');
+        console.log('- Active:', transform.active);
+        console.log('- Mode:', transform.mode);
+        console.log('- Base Point:', transform.basePoint);
+        console.log('- Preview Point:', transform.previewPoint);
+        console.log('- Target IDs:', transform.targetIds);
+        console.log('- Original Primitives:', transform.originalPrimitives.length);
+        console.log('- Preview Primitives:', transform.previewPrimitives.length);
+        
+        if (transform.originalPrimitives.length > 0) {
+          console.log('📋 Original Primitives:');
+          transform.originalPrimitives.forEach((p, i) => {
+            console.log(`  ${i}: ${p.id} (${p.type}) - ${p.data.slice(0, 4)}`);
+          });
+        }
+        
+        if (transform.previewPrimitives.length > 0) {
+          console.log('🎯 Preview Primitives:');
+          transform.previewPrimitives.forEach((p, i) => {
+            console.log(`  ${i}: ${p.id} (${p.type}) - ${p.data.slice(0, 4)}`);
+          });
+        }
+        
+        return transform;
+      };
+
+      // Quick access commands for manual testing
+      (window as any).startMove = () => {
+        CommandAdapters.startTransform('move');
+        console.log('🔄 Move transform started - click base point');
+      };
+      (window as any).startScale = () => {
+        CommandAdapters.startTransform('scale');
+        console.log('📐 Scale transform started - click base point');
+      };
+      (window as any).startRotate = () => {
+        CommandAdapters.startTransform('rotate');
+        console.log('🔄 Rotate transform started - click base point');
+      };
     }
-  }, [serviceRef.current, redrawAll, previewEnd]);
+  }, [serviceRef.current, redrawAll, previewEnd, snapResultRef]);
   // Subscribe to AppStateStore changes
   useEffect(() => {
     const unsubscribe = appStateStore.subscribe((newState: AppState) => {
@@ -1433,8 +1643,29 @@ const App: React.FC = () => {
                     intersectionSnap ?? constraintSnap ?? cursorWorld;
       let preview = finalPos;
 
-      // Only calculate snap for drawing tools
-      if (activeTool === 'SELECTION') {
+      // Panning functionality
+      if (panStart) {
+        const dx = (pos.x - panStart.x) / scale;
+        const dy = (pos.y - panStart.y) / scale;
+        
+        CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
+        
+        setIsDrawing(false);
+        setPanStart({ x: pos.x, y: pos.y });
+        debouncedRedraw(previewEnd, snapResultRef.current);
+        return;
+      }
+
+      // Handle transform preview with local snapping
+      const transformState = appState.transformPreview;
+      if (transformState.active && transformState.basePoint) {
+        CommandAdapters.updateTransformPreview(cursorWorld, shiftHeld);
+        debouncedRedraw(cursorWorld, snapResultRef.current);
+        return; // Exit early, let transform handle snapping
+      }
+
+      // Only calculate snap for drawing tools and transformations
+      if (activeTool === 'SELECTION' && !transformState.active) {
         // 🚫 SELECTION MODE: No snapping needed
         snapResult = {
           position: cursorWorld,
@@ -1567,18 +1798,6 @@ const App: React.FC = () => {
 
       }
 
-      // Panning functionality
-      if (panStart) {
-        const dx = (pos.x - panStart.x) / scale;
-        const dy = (pos.y - panStart.y) / scale;
-        
-        CommandAdapters.panImmediate(offsetX + dx, offsetY + dy);
-        
-        setIsDrawing(false);
-        setPanStart({ x: pos.x, y: pos.y });
-        debouncedRedraw(previewEnd, snapResultRef.current);
-        return;
-      }
 
       // Selection rectangle - IMMEDIATE updates
       if (activeTool === 'SELECTION' && selectionStart) {
@@ -1672,168 +1891,18 @@ const App: React.FC = () => {
       hysteresisActive, currentSnap, shiftHeld, orthoSnapEnabled,
       worldToScreen, SNAP_THRESHOLD, nearestOrthoAngleDeg, applyOrthoConstraint,
       shouldUseOrthoSnapping, getVertexKey, toggleVertexConstraint, vertexConstraints,
-      contextManager, redrawAll
+      contextManager, redrawAll, appState.transformPreview
     ]
   );
-  const processDrawingSnapping = (pos: { x: number; y: number }, cursorWorld: { x: number; y: number }) => {
-    const snapResult = snappingService.findSnap(pos, contextManager.getContext());
-    let finalSnapResult = snapResult;
-
-    // Manage constraint state based on current snap
-    manageConstraintState();
-
-    // Handle vertex hysteresis
-    if (hysteresisActive && currentSnap?.type === 'vertex') {
-      const worldDistance = Math.sqrt(
-        Math.pow(cursorWorld.x - currentSnap.position.x, 2) + 
-        Math.pow(cursorWorld.y - currentSnap.position.y, 2)
-      );
-      const UNSNAP_THRESHOLD = SNAP_THRESHOLD / scale;
-      
-      if (worldDistance <= UNSNAP_THRESHOLD) {
-        // Stay locked to current vertex or switch to better one
-        if (snapResult.type === 'vertex' && snapResult.strength > currentSnap.strength) {
-          finalSnapResult = snapResult;
-          setCurrentSnap({ type: 'vertex', position: snapResult.position, strength: snapResult.strength });
-        } else {
-          finalSnapResult = {
-            position: currentSnap.position,
-            type: 'vertex',
-            metadata: { vertex: currentSnap.position },
-            strength: Math.max(0.7, 1 - (worldDistance / UNSNAP_THRESHOLD))
-          };
-        }
-      } else {
-        // Release hysteresis
-        setHysteresisActive(false);
-        setCurrentSnap(null);
-        setTemporaryDisabling(false);
-      }
-    }
-
-    // Start new hysteresis for strong vertex snaps
-    if (!hysteresisActive && finalSnapResult.type === 'vertex') {
-      setHysteresisActive(true);
-      setCurrentSnap({ type: 'vertex', position: finalSnapResult.position, strength: finalSnapResult.strength });
-      setTemporaryDisabling(true);
-    }
-
-    // Extend visual indicators during hysteresis
-    if (hysteresisActive && currentSnap?.type === 'vertex' && finalSnapResult.type === 'none') {
-      const worldDistance = Math.sqrt(
-        Math.pow(cursorWorld.x - currentSnap.position.x, 2) + 
-        Math.pow(cursorWorld.y - currentSnap.position.y, 2)
-      );
-      const VISUAL_THRESHOLD = SNAP_THRESHOLD / scale;
-      
-      if (worldDistance <= VISUAL_THRESHOLD) {
-        finalSnapResult = {
-          position: currentSnap.position,
-          type: 'vertex',
-          metadata: { vertex: currentSnap.position },
-          strength: Math.max(0.3, 1 - (worldDistance / VISUAL_THRESHOLD))
-        };
-      }
-    }
-
-    // Update snap result reference
-    snapResultRef.current = finalSnapResult;
-
-    // Reset temporary disabling when out of hysteresis
-    if (!hysteresisActive && (orthoTempDisabledRef.current || constraintTempDisabledRef.current)) {
-      orthoTempDisabledRef.current = false;
-      constraintTempDisabledRef.current = false;
-      setOrthoTempDisabled(false);
-      setConstraintTempDisabled(false);
-    }
-  };
-  const manageConstraintState = () => {
-    const currentSnapResult = snapResultRef.current;
-    
-    if (currentSnapResult.type === 'constraint' && currentSnapResult.metadata?.constraint) {
-      CommandAdapters.setActiveConstraint(currentSnapResult.metadata.constraint);
-    } else if (currentSnapResult.type === 'intersection') {
-      // Keep existing constraint guide visible during intersection
-    } else if (currentSnapResult.type === 'vertex') {
-      if (currentSnapResult.strength > 0.8) {
-        CommandAdapters.setActiveConstraint(null);
-      }
-    } else {
-      CommandAdapters.setActiveConstraint(null);
-    }
-  };
-  const handleConstraintDetection = (pos: { x: number; y: number }, cursorWorld: { x: number; y: number }) => {
-    // Detect regular vertices for constraints
-    if (snapResultRef.current.type === 'vertex' && snapResultRef.current.metadata?.vertex && snappingService.getConfig().constraintEnabled) {
-      const vertex = snapResultRef.current.metadata.vertex;
-      const key = getVertexKey(vertex);
-      
-      if (!hoveredVerticesRef.current.has(key)) {
-        hoveredVerticesRef.current.add(key);
-        toggleVertexConstraint(vertex);
-      }
-    } else {
-      hoveredVerticesRef.current.clear();
-    }
-
-    // Detect currentStart point for constraints
-    if (currentStart && snappingService.getConfig().constraintEnabled) {
-      const currentStartScreen = worldToScreen(currentStart.x, currentStart.y);
-      const screenDistance = Math.sqrt(
-        Math.pow(currentStartScreen.x - pos.x, 2) + 
-        Math.pow(currentStartScreen.y - pos.y, 2)
-      );
-      
-      if (screenDistance < SNAP_THRESHOLD) {
-        const key = getVertexKey(currentStart);
-        if (!hoveredVerticesRef.current.has(key)) {
-          hoveredVerticesRef.current.add(key);
-          toggleVertexConstraint(currentStart);
-        }
-      }
-    }
-  };
-  const updateToolPreview = (cursorWorld: { x: number; y: number }) => {
-    const currentSnapResult = snapResultRef.current;
-    let preview = cursorWorld;
-
-    if (activeTool === 'LINE') {
-      if (currentSnapResult.type === 'intersection') {
-        preview = currentSnapResult.position;
-      } else if (hysteresisActive && currentSnap?.type === 'vertex') {
-        preview = currentSnap.position;
-      } else if (currentSnapResult.type === 'vertex') {
-        preview = currentSnapResult.position;
-      } else if (shiftHeld) {
-        const dx = cursorWorld.x - currentStart.x;
-        const dy = cursorWorld.y - currentStart.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const nearest = nearestOrthoAngleDeg(currentStart, cursorWorld);
-        const rad = (nearest.angle * Math.PI) / 180;
-        preview = { x: currentStart.x + Math.cos(rad) * dist, y: currentStart.y + Math.sin(rad) * dist };
-      } else if (shouldUseOrthoSnapping() && !orthoTempDisabledRef.current) {
-        const constrained = applyOrthoConstraint(currentStart, cursorWorld);
-        if (constrained) {
-          preview = { x: constrained.x, y: constrained.y };
-        }
-      }
-    } else if (activeTool === 'RECTANGLE') {
-      preview = currentSnapResult.type !== 'none' ? currentSnapResult.position : cursorWorld;
-    }
-
-    CommandAdapters.updatePreview(preview);
-    debouncedRedraw(preview, snapResultRef.current);
-  };
-  const setTemporaryDisabling = (enabled: boolean) => {
-    orthoTempDisabledRef.current = enabled;
-    constraintTempDisabledRef.current = enabled;
-    setOrthoTempDisabled(enabled);
-    setConstraintTempDisabled(enabled);
-  };
-
   const handleMouseDown = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     const pos = getMousePos(evt);
     const worldPos = screenToWorld(pos.x, pos.y);
+
+    // MIDDLE CLICK: Panning (allowed during drawing or transformations)
+    if (evt.button === 1) {
+      setPanStart({ x: pos.x, y: pos.y });
+      setIsDrawing(false);
+    }
 
     // LEFTCLICK: Drawing and Selection operations
     if (evt.button === 0) {
@@ -1855,7 +1924,14 @@ const App: React.FC = () => {
       let intersectionSnap = null;
       let finalPos = snapResult.type === 'vertex' ? snapResult.position : intersectionSnap ?? constraintSnap ?? screenToWorld(pos.x, pos.y);
 
-
+      // Handle transform operation first
+      if (CommandAdapters.processTransformClick(worldPos)) {
+        console.log('🛠️ Transform click processed');
+        evt.preventDefault();
+        updateTransformUI(); // Update transform overlay
+        return;
+      }
+  
       // Set drawing state for non-selection tools
       if (activeTool !== 'SELECTION') {
         if (!activeLayer) {
@@ -1994,9 +2070,6 @@ const App: React.FC = () => {
         return;
       }
           
-    } else if (evt.button === 1) {
-      setPanStart({ x: pos.x, y: pos.y });
-      setIsDrawing(false);
     }
 
   };
@@ -2007,10 +2080,18 @@ const App: React.FC = () => {
       setPanStart(null);
       CommandAdapters.panFinal(offsetX, offsetY);
       redrawAll(previewEnd, snapResultRef.current);
+      const transformState = appState.transformPreview;
     }
   };
   const handleContextMenu = (evt: React.MouseEvent<HTMLCanvasElement>) => {
     evt.preventDefault();
+
+    // Cancel transform if active
+    if (appState.transformPreview.active) {
+      CommandAdapters.cancelTransform();
+      updateTransformUI();
+      return;
+    }
     resetTool();
   };
   const handleClear = () => {

@@ -2,8 +2,11 @@
 import { appStateStore, type AppState } from './AppStateStore';
 import type { DrawingPrimitive } from '../types/DraftrTypes';
 import { layerService } from './LayerService';
+import { snappingService, contextManager } from './SnappingService';
 import { getErrorMessage, safeSync } from '../utils/errorHandling';
 import type { Point, ConstraintType } from '../types/ToolTypes';
+
+
 
 let onLivePreviewUpdate: (() => void) | null = null;
 type TransformMode = 'move' | 'scale' | 'rotate' | null;
@@ -395,9 +398,568 @@ export const CommandAdapters = {
 
 
   // TRANSFORM COMMANDS
+  startTransform: (mode: 'move' | 'scale' | 'rotate', targetIds?: string[]) => {
+    const { error } = safeSync(() => {
+      console.log('🎯 CommandAdapters.startTransform called', { mode, targetIds });
+      
+      const currentState = appStateStore.getState();
+      
+      const finalTargetIds = targetIds || currentState.selectedPrimitiveIds;
+      
+      if (finalTargetIds.length === 0) {
+        throw new Error('No primitives selected for transformation');
+      }
 
+      const originalPrimitives = currentState.primitives
+        .filter(p => finalTargetIds.includes(p.id))
+        .map(p => ({
+          ...p,
+          data: [...p.data]
+        }));
+
+      appStateStore.updateTemporaryState({
+        transformPreview: {
+          active: true,
+          mode,
+          targetIds: finalTargetIds,
+          basePoint: null,
+          previewPoint: null,
+          // 🎯 REMOVE previousPoint - we don't need it anymore
+          originalPrimitives: originalPrimitives
+        }
+      });
+
+      console.log(`🎯 Transform started: ${mode} on ${finalTargetIds.length} primitives`);
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.startTransform failed:', error);
+      throw new Error(error);
+    }
+  },
+  processTransformClick: (worldPos: Point): boolean => {
+    const { error, result } = safeSync(() => {
+      const currentState = appStateStore.getState();
+      if (!currentState.transformPreview.active) return false;
+
+      const transformState = currentState.transformPreview;
+
+      if (!transformState.basePoint) {
+        // 🎯 FIRST CLICK: Apply snapping to base point selection
+        
+        // Convert world position to screen for snapping calculation
+        const screenPos = { 
+          x: (worldPos.x + currentState.offsetX) * currentState.scale,
+          y: (worldPos.y + currentState.offsetY) * currentState.scale
+        };
+        
+        // Get snapping context
+        const context = {
+          primitives: currentState.primitives,
+          vertexConstraints: currentState.vertexConstraints,
+          activeConstraint: currentState.activeConstraint,
+          currentStart: null, // No current start for first click
+          shiftHeld: false,
+          orthoTempDisabled: false,
+          constraintTempDisabled: false,
+          scale: currentState.scale,
+          offsetX: currentState.offsetX,
+          offsetY: currentState.offsetY
+        };
+        
+        // Find snap result
+        const snapResult = snappingService.findSnap(screenPos, context);
+        
+        // Use snapped position if available, otherwise use original
+        const finalBasePoint = snapResult.type !== 'none' ? snapResult.position : worldPos;
+        
+        console.log(`🎯 Transform base point set with snapping:`, { 
+          original: worldPos, 
+          snapped: finalBasePoint,
+          snapType: snapResult.type 
+        });
+
+        appStateStore.updateTemporaryState({
+          transformPreview: {
+            ...transformState,
+            basePoint: finalBasePoint,
+            previousPoint: finalBasePoint // 🎯 Initialize for incremental moves
+          }
+        });
+        return true;
+      } else {
+        // Second click - execute transform (will handle snapping in finalize)
+        CommandAdapters.finalizeTransform(worldPos);
+        return true;
+      }
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.processTransformClick failed:', error);
+      return false;
+    }
+    
+    return result || false;
+  },
+  updateTransformPreview: (worldPos: Point, shiftHeld: boolean = false) => {
+    const { error } = safeSync(() => {
+      const currentState = appStateStore.getState();
+      const transformState = currentState.transformPreview;
+      
+      if (!transformState.active || !transformState.basePoint) return;
+
+      // Convert world position to screen for snapping calculation
+      const screenPos = { 
+        x: (worldPos.x + currentState.offsetX) * currentState.scale,
+        y: (worldPos.y + currentState.offsetY) * currentState.scale
+      };
+      
+      // 🎯 FIX: EXCLUDE SELECTED PRIMITIVES FROM SNAPPING (prevent self-snap)
+      const nonSelectedPrimitives = currentState.primitives.filter(p => 
+        !transformState.targetIds.includes(p.id)
+      );
+      
+      // Get snapping context - EXCLUDE selected primitives
+      const context = {
+        primitives: nonSelectedPrimitives, // 🎯 Only non-selected primitives
+        vertexConstraints: currentState.vertexConstraints,
+        activeConstraint: currentState.activeConstraint,
+        currentStart: transformState.basePoint, // Use base point for ortho calculations
+        shiftHeld: shiftHeld,
+        orthoTempDisabled: false,
+        constraintTempDisabled: false,
+        scale: currentState.scale,
+        offsetX: currentState.offsetX,
+        offsetY: currentState.offsetY
+      };
+      
+      // Find snap result (only on non-selected geometry)
+      const snapResult = snappingService.findSnap(screenPos, context);
+      
+      // 🎯 FIX: UPDATE SNAP RESULT REF FOR VISUALS
+      if (typeof (window as any).snapResultRef !== 'undefined') {
+        (window as any).snapResultRef.current = snapResult;
+      }
+      
+      // Use snapped position if available, otherwise use original
+      const finalWorldPos = snapResult.type !== 'none' ? snapResult.position : worldPos;
+
+      console.log(`🎯 Transform preview with snapping:`, { 
+        snapType: snapResult.type,
+        selectedCount: transformState.targetIds.length,
+        excludedPrimitives: currentState.primitives.length - nonSelectedPrimitives.length
+      });
+
+      let deltaX: number, deltaY: number;
+
+      // 🎯 CALCULATE DELTA FROM BASE POINT (not previous position)
+      // This prevents accumulation errors
+      deltaX = finalWorldPos.x - transformState.basePoint.x;
+      deltaY = finalWorldPos.y - transformState.basePoint.y;
+
+      // 🎯 APPLY TRANSFORM TO ACTUAL PRIMITIVES
+      const updatedPrimitives = currentState.primitives.map(primitive => {
+        if (!transformState.targetIds.includes(primitive.id)) {
+          return primitive;
+        }
+        
+        // 🎯 ALWAYS TRANSFORM FROM ORIGINAL POSITIONS to prevent drift
+        const originalPrimitive = transformState.originalPrimitives.find(p => p.id === primitive.id);
+        if (originalPrimitive) {
+          return applyTranslation(originalPrimitive, deltaX, deltaY);
+        }
+        return applyTranslation(primitive, deltaX, deltaY);
+      });
+
+      // 🎯 UPDATE STATE
+      appStateStore.updateTemporaryState({
+        primitives: updatedPrimitives,
+        transformPreview: {
+          ...transformState,
+          previewPoint: finalWorldPos
+          // 🎯 REMOVE previousPoint - we always calculate from base point
+        }
+      });
+
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.updateTransformPreview failed:', error);
+    }
+  },
+  finalizeTransform: (finalPos: Point) => {
+    const { error } = safeSync(() => {
+      const currentState = appStateStore.getState();
+      const transformState = currentState.transformPreview;
+      
+      if (!transformState.active || !transformState.basePoint) {
+        throw new Error('No active transform to finalize');
+      }
+
+      // 🎯 APPLY SNAPPING TO FINAL POSITION
+      
+      // Convert world position to screen for snapping calculation
+      const screenPos = { 
+        x: (finalPos.x + currentState.offsetX) * currentState.scale,
+        y: (finalPos.y + currentState.offsetY) * currentState.scale
+      };
+      
+      // Get snapping context
+      const context = {
+        primitives: currentState.primitives,
+        vertexConstraints: currentState.vertexConstraints,
+        activeConstraint: currentState.activeConstraint,
+        currentStart: transformState.basePoint,
+        shiftHeld: false,
+        orthoTempDisabled: false,
+        constraintTempDisabled: false,
+        scale: currentState.scale,
+        offsetX: currentState.offsetX,
+        offsetY: currentState.offsetY
+      };
+      
+      // Find snap result
+      const snapResult = snappingService.findSnap(screenPos, context);
+      
+      // Use snapped position if available, otherwise use original
+      const finalWorldPos = snapResult.type !== 'none' ? snapResult.position : finalPos;
+      
+      console.log(`✅ Finalizing transform with snapping:`, { 
+        original: finalPos, 
+        snapped: finalWorldPos,
+        snapType: snapResult.type 
+      });
+
+      // 🎯 SIMPLE FIX: Just clear the transform state, keeping primitives as they are
+      appStateStore.updateTemporaryState({
+        transformPreview: {
+          active: false,
+          mode: null,
+          targetIds: [],
+          basePoint: null,
+          previewPoint: null,
+          previousPoint: null,
+          originalPrimitives: []
+        }
+      });
+      
+      console.log(`✅ Transform ${transformState.mode} finalized at snapped position`);
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.finalizeTransform failed:', error);
+      throw new Error(error);
+    }
+  },
+  cancelTransform: () => {
+    const { error } = safeSync(() => {
+      const currentState = appStateStore.getState();
+      if (!currentState.transformPreview.active) return;
+
+      // 🎯 RESTORE ORIGINAL PRIMITIVES (undo the preview changes)
+      const originalPrimitives = currentState.transformPreview.originalPrimitives;
+      
+      // Create a mapping of original primitives by ID for quick lookup
+      const originalMap = new Map();
+      originalPrimitives.forEach(p => originalMap.set(p.id, p));
+      
+      // Restore the original state of transformed primitives
+      const restoredPrimitives = currentState.primitives.map(primitive => {
+        if (originalMap.has(primitive.id)) {
+          return originalMap.get(primitive.id); // Restore original
+        }
+        return primitive; // Keep non-transformed primitives
+      });
+
+      appStateStore.updateTemporaryState({
+        primitives: restoredPrimitives,
+        transformPreview: {
+          active: false,
+          mode: null,
+          targetIds: [],
+          basePoint: null,
+          previewPoint: null,
+          previousPoint: null,
+          originalPrimitives: [],
+        }
+      });
+      
+      console.log('❌ Transform cancelled - original state restored');
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.cancelTransform failed:', error);
+    }
+  },
+
+  // Actual transform execution commands (undoable)
+  transformMove: (targetIds: string[], deltaX: number, deltaY: number) => {
+    const { error } = safeSync(() => {
+      appStateStore.executeCommand('transform-move', (state: AppState) => {
+        const newPrimitives = state.primitives.map(primitive => {
+          if (!targetIds.includes(primitive.id)) return primitive;
+          
+          return applyTranslation(primitive, deltaX, deltaY);
+        });
+        
+        return {
+          ...state,
+          primitives: newPrimitives
+        };
+      });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.transformMove failed:', error);
+      throw new Error(error);
+    }
+  },
+  transformScale: (targetIds: string[], scale: number, basePoint: Point) => {
+    const { error } = safeSync(() => {
+      appStateStore.executeCommand('transform-scale', (state: AppState) => {
+        const newPrimitives = state.primitives.map(primitive => {
+          if (!targetIds.includes(primitive.id)) return primitive;
+          
+          return applyScaling(primitive, scale, basePoint);
+        });
+        
+        return {
+          ...state,
+          primitives: newPrimitives
+        };
+      });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.transformScale failed:', error);
+      throw new Error(error);
+    }
+  },
+  transformRotate: (targetIds: string[], angle: number, basePoint: Point) => {
+    const { error } = safeSync(() => {
+      appStateStore.executeCommand('transform-rotate', (state: AppState) => {
+        const newPrimitives = state.primitives.map(primitive => {
+          if (!targetIds.includes(primitive.id)) return primitive;
+          
+          return applyRotation(primitive, angle, basePoint);
+        });
+        
+        return {
+          ...state,
+          primitives: newPrimitives
+        };
+      });
+    });
+
+    if (error) {
+      console.error('🚨 CommandAdapters.transformRotate failed:', error);
+      throw new Error(error);
+    }
+  },
+  getTransformState: () => {
+    const currentState = appStateStore.getState();
+    return {
+      isActive: currentState.transformPreview.active,
+      mode: currentState.transformPreview.mode,
+      hasBasePoint: !!currentState.transformPreview.basePoint,
+      targetCount: currentState.transformPreview.targetIds.length
+    };
+  }
 };
 
+
+// Transformation HELPER functions
+const calculateTransformPreview = (
+  primitives: DrawingPrimitive[],
+  mode: 'move' | 'scale' | 'rotate',
+  basePoint: Point,
+  cursorPos: Point,
+  shiftHeld: boolean
+): DrawingPrimitive[] => {
+  console.log('🔍 calculateTransformPreview called:', {
+    primitivesCount: primitives.length,
+    mode,
+    basePoint,
+    cursorPos,
+    shiftHeld
+  });
+
+  if (primitives.length === 0) {
+    console.warn('⚠️ No primitives to transform!');
+    return [];
+  }
+
+  let result: DrawingPrimitive[] = [];
+
+  switch (mode) {
+    case 'move':
+      const deltaX = cursorPos.x - basePoint.x;
+      const deltaY = cursorPos.y - basePoint.y;
+      console.log('📐 Move calculation:', { deltaX, deltaY });
+      
+      result = primitives.map(p => {
+        const transformed = applyTranslation(p, deltaX, deltaY);
+        console.log('➡️ Move transform:', {
+          original: p.data.slice(0, 4),
+          transformed: transformed.data.slice(0, 4)
+        });
+        return transformed;
+      });
+      break;
+      
+    case 'scale':
+      const scale = calculateScaleFactor(basePoint, cursorPos, shiftHeld);
+      console.log('📐 Scale calculation:', { scale });
+      
+      result = primitives.map(p => {
+        const transformed = applyScaling(p, scale, basePoint);
+        console.log('⚖️ Scale transform:', {
+          original: p.data.slice(0, 4),
+          transformed: transformed.data.slice(0, 4)
+        });
+        return transformed;
+      });
+      break;
+      
+    case 'rotate':
+      const angle = calculateRotationAngle(basePoint, cursorPos);
+      console.log('📐 Rotation calculation:', { angle });
+      
+      result = primitives.map(p => {
+        const transformed = applyRotation(p, angle, basePoint);
+        console.log('🔄 Rotation transform:', {
+          original: p.data.slice(0, 4),
+          transformed: transformed.data.slice(0, 4)
+        });
+        return transformed;
+      });
+      break;
+      
+    default:
+      console.warn('⚠️ Unknown transform mode:', mode);
+      result = primitives;
+  }
+
+  console.log('✅ calculateTransformPreview result count:', result.length);
+  return result;
+};
+const applyTranslation = (primitive: DrawingPrimitive, deltaX: number, deltaY: number): DrawingPrimitive => {
+  const newPrimitive = { ...primitive, data: [...primitive.data] };
+  
+  switch (primitive.type) {
+    case 'line':
+      // [x1, y1, x2, y2, ...colors]
+      newPrimitive.data[0] += deltaX; // x1
+      newPrimitive.data[1] += deltaY; // y1
+      newPrimitive.data[2] += deltaX; // x2
+      newPrimitive.data[3] += deltaY; // y2
+      break;
+    case 'rectangle':
+      // [x1, y1, x2, y2, ...colors]
+      newPrimitive.data[0] += deltaX; // x1
+      newPrimitive.data[1] += deltaY; // y1
+      newPrimitive.data[2] += deltaX; // x2
+      newPrimitive.data[3] += deltaY; // y2
+      break;
+    // Add other primitive types as needed
+  }
+  
+  return newPrimitive;
+};
+const calculateScaleFactor = (basePoint: Point, cursorPos: Point, uniform: boolean): number => {
+  const baseDistance = 50; // Reference distance
+  const currentDistance = Math.sqrt(
+    Math.pow(cursorPos.x - basePoint.x, 2) + 
+    Math.pow(cursorPos.y - basePoint.y, 2)
+  );
+  
+  let scale = currentDistance / baseDistance;
+  
+  // Apply constraints
+  scale = Math.max(0.1, Math.min(10, scale));
+  
+  // Snap to 1.0 when close
+  if (Math.abs(scale - 1.0) < 0.05) {
+    scale = 1.0;
+  }
+  
+  return scale;
+};
+const applyScaling = (primitive: DrawingPrimitive, scale: number, basePoint: Point): DrawingPrimitive => {
+  const newPrimitive = { ...primitive, data: [...primitive.data] };
+  
+  switch (primitive.type) {
+    case 'line':
+      // Scale from base point
+      newPrimitive.data[0] = basePoint.x + (primitive.data[0] - basePoint.x) * scale;
+      newPrimitive.data[1] = basePoint.y + (primitive.data[1] - basePoint.y) * scale;
+      newPrimitive.data[2] = basePoint.x + (primitive.data[2] - basePoint.x) * scale;
+      newPrimitive.data[3] = basePoint.y + (primitive.data[3] - basePoint.y) * scale;
+      break;
+    case 'rectangle':
+      newPrimitive.data[0] = basePoint.x + (primitive.data[0] - basePoint.x) * scale;
+      newPrimitive.data[1] = basePoint.y + (primitive.data[1] - basePoint.y) * scale;
+      newPrimitive.data[2] = basePoint.x + (primitive.data[2] - basePoint.x) * scale;
+      newPrimitive.data[3] = basePoint.y + (primitive.data[3] - basePoint.y) * scale;
+      break;
+  }
+  
+  return newPrimitive;
+};
+const calculateRotationAngle = (basePoint: Point, cursorPos: Point): number => {
+  const dx = cursorPos.x - basePoint.x;
+  const dy = cursorPos.y - basePoint.y;
+  let angle = Math.atan2(dy, dx) * (180 / Math.PI);
+  
+  // Snap to common angles (0, 15, 30, 45, 90, etc.)
+  const snapAngles = [0, 15, 30, 45, 60, 75, 90, 105, 120, 135, 150, 165, 180];
+  const snapped = snapAngles.reduce((prev, curr) => {
+    return Math.abs(curr - angle) < Math.abs(prev - angle) ? curr : prev;
+  });
+  
+  // Only snap if close enough
+  if (Math.abs(snapped - angle) < 5) {
+    angle = snapped;
+  }
+  
+  return angle;
+};
+const applyRotation = (primitive: DrawingPrimitive, angle: number, basePoint: Point): DrawingPrimitive => {
+  const newPrimitive = { ...primitive, data: [...primitive.data] };
+  const radians = angle * (Math.PI / 180);
+  
+  const rotatePoint = (x: number, y: number): [number, number] => {
+    const translatedX = x - basePoint.x;
+    const translatedY = y - basePoint.y;
+    
+    const rotatedX = translatedX * Math.cos(radians) - translatedY * Math.sin(radians);
+    const rotatedY = translatedX * Math.sin(radians) + translatedY * Math.cos(radians);
+    
+    return [rotatedX + basePoint.x, rotatedY + basePoint.y];
+  };
+  
+  switch (primitive.type) {
+    case 'line':
+      const [x1, y1] = rotatePoint(primitive.data[0], primitive.data[1]);
+      const [x2, y2] = rotatePoint(primitive.data[2], primitive.data[3]);
+      newPrimitive.data[0] = x1;
+      newPrimitive.data[1] = y1;
+      newPrimitive.data[2] = x2;
+      newPrimitive.data[3] = y2;
+      break;
+    case 'rectangle':
+      // For rectangle, rotate all corners
+      const [rx1, ry1] = rotatePoint(primitive.data[0], primitive.data[1]);
+      const [rx2, ry2] = rotatePoint(primitive.data[2], primitive.data[3]);
+      newPrimitive.data[0] = rx1;
+      newPrimitive.data[1] = ry1;
+      newPrimitive.data[2] = rx2;
+      newPrimitive.data[3] = ry2;
+      break;
+  }
+  
+  return newPrimitive;
+};
 
 
 
@@ -468,5 +1030,14 @@ if (typeof window !== 'undefined') {
       console.error('❌ CommandAdapters test failed:', error);
       return false;
     }
+  };
+
+  (window as any).transformHelpers = {
+    calculateTransformPreview,
+    applyTranslation,
+    applyScaling,
+    applyRotation,
+    calculateScaleFactor,
+    calculateRotationAngle
   };
 }
