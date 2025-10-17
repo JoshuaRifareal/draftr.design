@@ -1289,35 +1289,6 @@ const App: React.FC = () => {
           return false;
         }
       };
-      (window as any).inspectTransformState = () => {
-        const state = appStateStore.getState();
-        const transform = state.transformPreview;
-        
-        console.log('🔍 Current Transform State:');
-        console.log('- Active:', transform.active);
-        console.log('- Mode:', transform.mode);
-        console.log('- Base Point:', transform.basePoint);
-        console.log('- Preview Point:', transform.previewPoint);
-        console.log('- Target IDs:', transform.targetIds);
-        console.log('- Original Primitives:', transform.originalPrimitives.length);
-        console.log('- Preview Primitives:', transform.previewPrimitives.length);
-        
-        if (transform.originalPrimitives.length > 0) {
-          console.log('📋 Original Primitives:');
-          transform.originalPrimitives.forEach((p, i) => {
-            console.log(`  ${i}: ${p.id} (${p.type}) - ${p.data.slice(0, 4)}`);
-          });
-        }
-        
-        if (transform.previewPrimitives.length > 0) {
-          console.log('🎯 Preview Primitives:');
-          transform.previewPrimitives.forEach((p, i) => {
-            console.log(`  ${i}: ${p.id} (${p.type}) - ${p.data.slice(0, 4)}`);
-          });
-        }
-        
-        return transform;
-      };
       (window as any).updateTransformUI = updateTransformUI;
 
       // Quick access commands for manual testing
@@ -1347,39 +1318,39 @@ const App: React.FC = () => {
     return unsubscribe;
   }, []);
   // Subscribe to LayerService changes for automatic redraw
-  useEffect(() => {
-    const eventTypes = layerService.getEventTypes();
+  // useEffect(() => {
+  //   const eventTypes = layerService.getEventTypes();
     
-    const unsubscribeLayersChanged = layerService.subscribe(
-      eventTypes.LAYERS_CHANGED, 
-      () => {
-        console.log('🔄 Layer change - triggering redraw');
-        redrawAll(previewEnd, snapResultRef.current);
-      }
-    );
+  //   const unsubscribeLayersChanged = layerService.subscribe(
+  //     eventTypes.LAYERS_CHANGED, 
+  //     () => {
+  //       console.log('🔄 Layer change - triggering redraw');
+  //       redrawAll(previewEnd, snapResultRef.current);
+  //     }
+  //   );
 
-    const unsubscribePropertiesChanged = layerService.subscribe(
-      eventTypes.LAYER_PROPERTIES_CHANGED,
-      () => {
-        console.log('🎨 Layer property change - triggering redraw');
-        redrawAll(previewEnd, snapResultRef.current);
-      }
-    );
+  //   const unsubscribePropertiesChanged = layerService.subscribe(
+  //     eventTypes.LAYER_PROPERTIES_CHANGED,
+  //     () => {
+  //       console.log('🎨 Layer property change - triggering redraw');
+  //       redrawAll(previewEnd, snapResultRef.current);
+  //     }
+  //   );
 
-    const unsubscribeActiveLayerChanged = layerService.subscribe(
-      eventTypes.ACTIVE_LAYER_CHANGED,
-      () => {
-        console.log('🎯 Active layer change - triggering redraw');
-        redrawAll(previewEnd, snapResultRef.current);
-      }
-    );
+  //   const unsubscribeActiveLayerChanged = layerService.subscribe(
+  //     eventTypes.ACTIVE_LAYER_CHANGED,
+  //     () => {
+  //       console.log('🎯 Active layer change - triggering redraw');
+  //       redrawAll(previewEnd, snapResultRef.current);
+  //     }
+  //   );
 
-    return () => {
-      unsubscribeLayersChanged();
-      unsubscribePropertiesChanged();
-      unsubscribeActiveLayerChanged();
-    };
-  }, [redrawAll, previewEnd]);
+  //   return () => {
+  //     unsubscribeLayersChanged();
+  //     unsubscribePropertiesChanged();
+  //     unsubscribeActiveLayerChanged();
+  //   };
+  // }, [redrawAll, previewEnd]);
   // Register lines with selection service
   useEffect(() => {
     selectionService.clearAll();

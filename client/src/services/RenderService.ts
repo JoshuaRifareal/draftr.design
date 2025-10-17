@@ -372,7 +372,7 @@ export class RenderService {
 
     // Draw transform preview if active
     if (params.transformPreview?.active) {
-      this.drawTransformPreview(params.transformPreview);
+      this.drawTransformPreview(params.transformPreview, snapColor);
     }
   }
 
@@ -418,7 +418,7 @@ export class RenderService {
       this.drawSelectionHighlight(primitive, true);
     });
   }
-  private drawTransformPreview(transformPreview: RedrawParams['transformPreview']) {
+  private drawTransformPreview(transformPreview: RedrawParams['transformPreview'], snapColor: { r: number; g: number; b: number; a: number; }) {
     if (!transformPreview) return;
     
     // Draw base point
@@ -427,7 +427,7 @@ export class RenderService {
           transformPreview.basePoint.x, 
           transformPreview.basePoint.y, 
           CROSS_INDICATOR_SIZE,
-          1, 1, 1, 1
+          snapColor.r, snapColor.g, snapColor.b, snapColor.a
         );
     }
   }
