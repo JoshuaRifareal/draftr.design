@@ -60,8 +60,6 @@ export class LayerService {
     private inheritanceCache = new Map<string, LayerProperties>();
     private cacheVersion: number = 0;
     private rootLayers: Layer[] = [];
-    private lastNotifyTime: number = 0;
-    private readonly NOTIFY_THROTTLE_MS = 50;
 
     // Enhanced Event system
     private listeners: Map<string, Set<() => void>> = new Map();
@@ -1656,17 +1654,7 @@ export class LayerService {
         };
     }
     notifyListeners(eventType: string): void {
-    // 🎯 THROTTLE LAYERS_CHANGED events specifically
-    if (eventType === this.EVENT_TYPES.LAYERS_CHANGED) {
-        const now = Date.now();
-        if (now - this.lastNotifyTime < this.NOTIFY_THROTTLE_MS) {
-        return; // 🎯 Skip if we notified recently
-        }
-        this.lastNotifyTime = now;
-    }
-    
-    // Your existing logic
-    this.listeners.get(eventType)?.forEach(listener => listener());
+        this.listeners.get(eventType)?.forEach(listener => listener());
     }
     getAutoEditLayerId(): string | null {
         return this.autoEditLayerId;
