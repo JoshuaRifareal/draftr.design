@@ -80,7 +80,8 @@ export class SelectionService {
 
       if (assignedLayerId) {
         try {
-          layerService.assignPrimitiveToLayer(id, assignedLayerId);
+          // Avoid notifying on every primitive registration to prevent N redraws during bulk ops
+          layerService.assignPrimitiveToLayer(id, assignedLayerId, { notify: false });
         } catch (layerError) {
           console.warn(`⚠️ Could not assign primitive ${id} to layer ${assignedLayerId}:`, getErrorMessage(layerError));
         }
@@ -389,8 +390,10 @@ export class SelectionService {
       ids.forEach(id => {
         const primitive = this.primitives.get(id);
         if (primitive && primitive.layerId) {
-          layerService.assignPrimitiveToLayer(id, null);
+          // Remove primitive from layer WITHOUT notifying on each primitive
+          layerService.assignPrimitiveToLayer(id, null, { notify: false });
         }
+        // Now it is safe for SelectionService to delete its own primitive entry
         this.primitives.delete(id);
       });
       console.log(`🗑️ Deleted ${ids.length} primitives`);
@@ -515,17 +518,35 @@ export class SelectionService {
 
   clearAll(): void {
     this.safeOperation('clearAll', () => {
-      this.primitives.forEach((primitive, id) => {
-          if (primitive.layerId) {
-              layerService.assignPrimitiveToLayer(id, null);
-          }
-      });
-      
+      // Clear selection internal state only. Do not touch LayerService here to avoid
+      // delete/reassign races — LayerService is authoritative for layer membership.
       this.primitives.clear();
       this.nextId = 1;
       // 🎯 PERFORMANCE: Clear cache
       this.clearCache();
     });
+  }
+
+  // Replace internal primitives map from authoritative app primitives in one shot.
+  // This avoids touching LayerService (no assign/unassign calls) and is much faster
+  // for bulk syncs such as loading or when appState.primitives changes.
+  syncPrimitives(primitives: { id: string; type: Primitive['type']; data: number[]; layerId?: string | null }[]): void {
+    this.safeOperation('syncPrimitives', () => {
+      this.clearCache();
+      this.primitives.clear();
+
+      for (const p of primitives) {
+        this.primitives.set(p.id, {
+          id: p.id,
+          type: p.type,
+          data: p.data,
+          layerId: p.layerId
+        });
+      }
+
+      // Keep internal ID counter reasonable
+      this.nextId = Math.max(this.nextId, this.primitives.size + 1);
+    }, { primitives });
   }
 }
 

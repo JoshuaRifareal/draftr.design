@@ -1289,35 +1289,6 @@ const App: React.FC = () => {
           return false;
         }
       };
-      (window as any).inspectTransformState = () => {
-        const state = appStateStore.getState();
-        const transform = state.transformPreview;
-        
-        console.log('🔍 Current Transform State:');
-        console.log('- Active:', transform.active);
-        console.log('- Mode:', transform.mode);
-        console.log('- Base Point:', transform.basePoint);
-        console.log('- Preview Point:', transform.previewPoint);
-        console.log('- Target IDs:', transform.targetIds);
-        console.log('- Original Primitives:', transform.originalPrimitives.length);
-        console.log('- Preview Primitives:', transform.previewPrimitives.length);
-        
-        if (transform.originalPrimitives.length > 0) {
-          console.log('📋 Original Primitives:');
-          transform.originalPrimitives.forEach((p, i) => {
-            console.log(`  ${i}: ${p.id} (${p.type}) - ${p.data.slice(0, 4)}`);
-          });
-        }
-        
-        if (transform.previewPrimitives.length > 0) {
-          console.log('🎯 Preview Primitives:');
-          transform.previewPrimitives.forEach((p, i) => {
-            console.log(`  ${i}: ${p.id} (${p.type}) - ${p.data.slice(0, 4)}`);
-          });
-        }
-        
-        return transform;
-      };
       (window as any).updateTransformUI = updateTransformUI;
 
       // Quick access commands for manual testing
@@ -1382,11 +1353,17 @@ const App: React.FC = () => {
   }, [redrawAll, previewEnd]);
   // Register lines with selection service
   useEffect(() => {
-    selectionService.clearAll();
-  
-    primitives.forEach(primitive => {
-      selectionService.registerPrimitiveWithId(primitive.id, primitive.type, primitive.data, primitive.layerId);
-    });
+    // Bulk-sync selection primitives from authoritative app state. This avoids
+    // calling assignPrimitiveToLayer repeatedly (which can cause delete/reassign races
+    // and per-primitive redraw storms). SelectionService will adopt the list directly.
+    selectionService.syncPrimitives(primitives.map(p => ({ id: p.id, type: p.type, data: p.data, layerId: p.layerId })));
+
+    // Notify layers changed once (in case external consumers rely on this)
+    try {
+      layerService.notifyLayersChanged();
+    } catch (err) {
+      // ignore if not ready
+    }
   }, [primitives]);
   // Snapping config update on mount
   useEffect(() => {

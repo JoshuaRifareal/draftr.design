@@ -60,6 +60,8 @@ export class LayerService {
     private inheritanceCache = new Map<string, LayerProperties>();
     private cacheVersion: number = 0;
     private rootLayers: Layer[] = [];
+    private lastNotifyTime: number = 0;
+    private readonly NOTIFY_THROTTLE_MS = 50;
 
     // Enhanced Event system
     private listeners: Map<string, Set<() => void>> = new Map();
@@ -947,7 +949,9 @@ export class LayerService {
 
     // ==================== PRIMITIVE MANAGEMENT ====================
 
-    assignPrimitiveToLayer(primitiveId: string, layerId: string | null): boolean {
+    // Assign a primitive to a layer. options.notify=false disables notifying listeners (useful for bulk operations)
+    assignPrimitiveToLayer(primitiveId: string, layerId: string | null, options?: { notify?: boolean }): boolean {
+        const shouldNotify = options?.notify !== false;
         return this.safeOperation('assignPrimitiveToLayer', () => {
         if (!primitiveId || primitiveId.trim() === '') {
             throw new Error('Invalid primitiveId provided');
@@ -975,26 +979,23 @@ export class LayerService {
             // Add to target layer
             layer.primitiveIds.add(primitiveId);
         } else {
-            // 🎯 FIX: NO ORPHANED PRIMITIVES - delete instead of orphan
             // Remove from all layers first
             for (const existingLayer of this.layers.values()) {
             if (existingLayer.primitiveIds.has(primitiveId)) {
                 existingLayer.primitiveIds.delete(primitiveId);
             }
             }
-            
-            // 🎯 DIRECT deletion without calling SelectionService (breaks circular dependency)
-            if (typeof (window as any).selectionService !== 'undefined') {
-            // Use direct primitive removal instead of unregisterPrimitive
-            const selectionService = (window as any).selectionService;
-            if (selectionService.primitives && selectionService.primitives.has(primitiveId)) {
-                selectionService.primitives.delete(primitiveId);
-            }
-            }
-            console.log('🗑️ Deleted primitive (no layer assignment):', primitiveId);
+
+            // NOTE: Do not directly delete primitives from SelectionService here.
+            // SelectionService owns its primitive store; deleting it from here can race with
+            // SelectionService iterations. Callers that want primitives removed should
+            // clear SelectionService separately. Keep a log for diagnostics.
+            console.log('🗑️ Removed primitive from layers (orphaned):', primitiveId);
         }
-        
-        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+
+        if (shouldNotify) {
+            this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
+        }
         return true;
         }, { primitiveId, layerId });
     }
@@ -1010,6 +1011,11 @@ export class LayerService {
         }
         return [];
         }, { layerId });
+    }
+
+    // Public helper to notify listeners for layers changed (useful after bulk operations)
+    notifyLayersChanged(): void {
+        this.notifyListeners(this.EVENT_TYPES.LAYERS_CHANGED);
     }
 
     // ==================== LAYER QUERIES & VALIDATION ====================
@@ -1654,6 +1660,16 @@ export class LayerService {
         };
     }
     notifyListeners(eventType: string): void {
+        // 🎯 THROTTLE LAYERS_CHANGED events specifically
+        if (eventType === this.EVENT_TYPES.LAYERS_CHANGED) {
+            const now = Date.now();
+            if (now - this.lastNotifyTime < this.NOTIFY_THROTTLE_MS) {
+            return; // 🎯 Skip if we notified recently
+            }
+            this.lastNotifyTime = now;
+        }
+        
+        // Your existing logic
         this.listeners.get(eventType)?.forEach(listener => listener());
     }
     getAutoEditLayerId(): string | null {

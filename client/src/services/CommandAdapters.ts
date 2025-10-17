@@ -299,17 +299,18 @@ export const CommandAdapters = {
       appStateStore.executeCommand('clear-canvas', (state: AppState) => {
         // 🎯 FIX: Clear layer assignments directly
         console.log('🗑️ Clearing primitives from layers');
+        // Use layerService.assignPrimitiveToLayer with notify:false to avoid per-primitive notifications
         state.primitives.forEach(primitive => {
-          // Remove from layer directly
           if (primitive.layerId) {
-            const layer = layerService.getLayer(primitive.layerId);
-            if (layer && layer.primitiveIds.has(primitive.id)) {
-              layer.primitiveIds.delete(primitive.id);
+            try {
+              layerService.assignPrimitiveToLayer(primitive.id, null, { notify: false });
+            } catch (e) {
+              // best-effort
             }
           }
         });
         
-        // Clear selection service directly
+        // Clear selection service internal map
         if (typeof (window as any).selectionService !== 'undefined') {
           (window as any).selectionService.clearAll();
         }
@@ -320,6 +321,8 @@ export const CommandAdapters = {
           selectedPrimitiveIds: []
         };
       });
+      // After bulk layer removals, trigger a single layers-changed notification
+      try { layerService.notifyLayersChanged(); } catch (e) { /* ignore */ }
     });
 
     if (error) {
